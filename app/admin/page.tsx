@@ -4,7 +4,14 @@ import { AdminLogin } from "@/components/AdminLogin";
 import { SignOutButton } from "@/components/SignOutButton";
 import { NewTournamentForm } from "@/components/admin/NewTournamentForm";
 import { AdminTabs } from "@/components/admin/AdminTabs";
-import { listTournaments, getTournamentTeams, getTournamentMatches, getPlayersForTournament } from "@/lib/db/queries";
+import { AdminAllPlayers } from "@/components/admin/AdminAllPlayers";
+import {
+  listTournaments,
+  getTournamentTeams,
+  getTournamentMatches,
+  getPlayersForTournament,
+  listAllPlayersForAdmin,
+} from "@/lib/db/queries";
 import { EmptyState, SectionHeading, Stamp } from "@/components/ui/card";
 import { formatDate } from "@/lib/format";
 import { statusLabel, statusTone } from "@/lib/tones";
@@ -26,6 +33,9 @@ export default async function AdminPage({
   }
 
   const tournaments = await listTournaments();
+  // Includes players with no competition and players in no squad, which no
+  // tournament-scoped query returns.
+  const allPlayers = await listAllPlayersForAdmin();
   const stats = await Promise.all(
     tournaments.map(async (t) => {
       const [teams, matches, players] = await Promise.all([
@@ -68,6 +78,13 @@ export default async function AdminPage({
                 )}
               </section>
             ),
+          },
+          {
+            id: "players",
+            label: "Players",
+            hint: "Every registration",
+            badge: allPlayers.length,
+            content: <AdminAllPlayers players={allPlayers} />,
           },
           {
             id: "create",

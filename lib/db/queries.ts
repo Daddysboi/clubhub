@@ -103,7 +103,15 @@ export async function getTournamentPlayers(tournamentId: string) {
     .orderBy(asc(players.fullName));
 }
 
-/** Public roster: never selects phone. */
+/**
+ * Public roster: never selects phone, and never includes a player who has not
+ * been put in a squad.
+ *
+ * The inner join is the privacy boundary. An open `/join` form means anyone can
+ * submit a name, and a left join would publish every one of those submissions on
+ * the public players page before an organiser has looked at them. Only players
+ * attached to a team are part of a competition's public record.
+ */
 export async function getPublicPlayers(tournamentId?: string) {
   const base = db
     .select({
@@ -117,7 +125,7 @@ export async function getPublicPlayers(tournamentId?: string) {
       teamId: teamPlayers.teamId,
     })
     .from(players)
-    .leftJoin(teamPlayers, eq(teamPlayers.playerId, players.id));
+    .innerJoin(teamPlayers, eq(teamPlayers.playerId, players.id));
 
   return tournamentId
     ? base.where(eq(players.tournamentId, tournamentId)).orderBy(asc(players.fullName))
@@ -169,6 +177,12 @@ export async function getStandings(tournamentId: string): Promise<Standings> {
   return computeStandings(teamRows, matchRows);
 }
 
+/**
+ * Name search over the public roster.
+ *
+ * Inner join, same privacy boundary as `getPublicPlayers`: search must not
+ * become a way to enumerate players who have not been placed in a squad.
+ */
 export async function searchPlayers(query: string, limit = 50) {
   const q = query.trim();
   if (!q) return getPublicPlayers();
@@ -184,7 +198,7 @@ export async function searchPlayers(query: string, limit = 50) {
       teamId: teamPlayers.teamId,
     })
     .from(players)
-    .leftJoin(teamPlayers, eq(teamPlayers.playerId, players.id))
+    .innerJoin(teamPlayers, eq(teamPlayers.playerId, players.id))
     .where(ilike(players.fullName, `%${q}%`))
     .limit(limit);
 }
@@ -227,6 +241,41 @@ export async function getPlayersForTournament(tournamentId: string) {
     .leftJoin(teamPlayers, eq(teamPlayers.playerId, players.id))
     .where(eq(players.tournamentId, tournamentId))
     .orderBy(asc(players.fullName));
+}
+
+/**
+ * Every player the organiser can act on, across all competitions.
+ *
+ * Left join on the squad and a left join to the tournament, so two groups that
+ * are otherwise invisible to admin still appear: players who signed up without
+ * choosing a competition (`tournament_id is null`), and players registered to a
+ * competition but never placed in a squad. An inner join on either side would
+ * drop both groups, leaving no way to delete them from anywhere.
+ *
+ * Admin-only by construction: this selects `phone`, which the public roster
+ * query deliberately never does.
+ */
+export async function listAllPlayersForAdmin() {
+  return db
+    .select({
+      id: players.id,
+      fullName: players.fullName,
+      nickname: players.nickname,
+      phone: players.phone,
+      position: players.position,
+      photoUrl: players.photoUrl,
+      createdAt: players.createdAt,
+      tournamentId: players.tournamentId,
+      tournamentName: tournaments.name,
+      teamId: teamPlayers.teamId,
+      teamName: teams.name,
+      teamColor: teams.color,
+    })
+    .from(players)
+    .leftJoin(teamPlayers, eq(teamPlayers.playerId, players.id))
+    .leftJoin(teams, eq(teams.id, teamPlayers.teamId))
+    .leftJoin(tournaments, eq(tournaments.id, players.tournamentId))
+    .orderBy(desc(players.createdAt));
 }
 
 // ---------------- match events & statistics ----------------

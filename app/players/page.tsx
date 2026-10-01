@@ -3,6 +3,7 @@ import { getPublicPlayers, listTournaments, searchPlayers } from "@/lib/db/queri
 import { Card, EmptyState, SectionHeading } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PlayerRow } from "@/components/PlayerRow";
+import { PlayersFilters } from "@/components/PlayersFilters";
 
 export const dynamic = "force-dynamic";
 
@@ -24,45 +25,26 @@ export default async function PlayersPage({
     <div className="mx-auto max-w-4xl px-4 py-10">
       <SectionHeading title="Players" eyebrow={`${players.length} registered`} />
 
-      <form method="get" className="mb-6 flex flex-wrap gap-2">
-        <input
-          type="search"
-          name="q"
-          defaultValue={query}
-          placeholder="Search by name…"
-          aria-label="Search players"
-          className="min-h-11 min-w-0 flex-1 rounded-lg border border-[var(--rule-strong)] bg-[var(--paper)] px-3 py-2.5 text-base text-[var(--ink)] outline-none placeholder:text-[var(--ink-3)] focus:border-[var(--pitch)] focus:ring-2 focus:ring-[var(--pitch)]/30"
-        />
-        <select
-          name="tournament"
-          defaultValue={scope ?? ""}
-          aria-label="Filter by tournament"
-          className="min-h-11 rounded-lg border border-[var(--rule-strong)] bg-[var(--paper)] px-3 py-2.5 text-base text-[var(--ink)] outline-none focus:border-[var(--pitch)]"
-        >
-          <option value="">All competitions</option>
-          {tournaments.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-        <Button type="submit" variant="secondary">
-          Search
-        </Button>
-      </form>
+      <PlayersFilters
+        tournaments={tournaments.map((t) => ({ id: t.id, name: t.name }))}
+        query={query}
+        scope={scope}
+      />
 
       <Card className="overflow-hidden">
         {players.length === 0 ? (
           <EmptyState
-            title={query ? "No players match that search" : "No players yet"}
+            title={query ? "No players match that search" : "No squad players yet"}
             hint={
               query
                 ? "Try a different name."
-                : "Players appear here as soon as they register."
+                : scope
+                  ? "This competition has no squad players yet."
+                  : "Players appear here once an organiser adds them to a squad."
             }
             action={
               <Link href="/join" className="block w-full sm:w-auto sm:inline-block">
-                <Button block>Register now</Button>
+                <Button block>Join a competition</Button>
               </Link>
             }
           />

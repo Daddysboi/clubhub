@@ -67,7 +67,7 @@ export function SiteNav() {
             href="/join"
             className="flex min-h-11 items-center rounded-lg bg-[var(--pitch)] px-4 text-sm font-bold text-[var(--accent-ink)] transition active:scale-[0.98]"
           >
-            Sign up
+            Join
           </Link>
         </div>
       </header>

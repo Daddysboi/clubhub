@@ -28,9 +28,14 @@ export function SignupForm({
         <Stamp tone="pitch">Registered</Stamp>
         <h2 className="mt-4 text-2xl font-bold text-[var(--ink)]">You&apos;re in!</h2>
         <p className="mt-2 text-[var(--ink-2)]">
-          Your name is now on the players list
-          {tournamentName ? ` for ${tournamentName}` : ""}. The organiser will assign you to a team
-          before kickoff.
+          You&apos;re registered
+          {tournamentName ? ` for ${tournamentName}` : ""}. The organiser will assign you to a
+          squad, and your name appears on the team sheet from then on.
+        </p>
+        {/* The public roster only lists squad players, so say that plainly rather
+            than implying the name is already visible on the site. */}
+        <p className="mt-3 text-sm text-[var(--ink-3)]">
+          Your name is not published until you join a squad.
         </p>
         <p className="mt-6 text-sm text-[var(--ink-3)]">
           Your phone number is stored for the organiser only and is never shown publicly.

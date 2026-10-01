@@ -155,7 +155,8 @@ export async function deletePlayer(_prev: ActionState, formData: FormData): Prom
 
   await db.delete(players).where(eq(players.id, playerId));
 
-  revalidatePath("/admin");
+  // A player may belong to no competition at all, which was the entire reason
+  // this list was reachable from /admin rather than a tournament roster only.
   refresh(existing[0].tournamentId);
 
   return { ok: true, message: `${existing[0].fullName} removed` };
