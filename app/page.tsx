@@ -56,7 +56,22 @@ export default async function HomePage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:py-12">
-      <section className="relative overflow-hidden rounded-xl border border-[var(--rule)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--pitch)]/15 p-6 sm:p-10">
+      <section className="relative overflow-hidden rounded-xl border border-[var(--rule)] bg-[var(--surface)] p-6 sm:p-10">
+        {/* Photo behind the hero, dimmed and scrimmed from the left so the
+            title keeps full contrast on every viewport. */}
+        <Image
+          src="/hero-bg-1920.jpg"
+          alt=""
+          aria-hidden
+          fill
+          priority
+          sizes="100vw"
+          className="pointer-events-none object-cover object-center opacity-45 select-none"
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-gradient-to-r from-[var(--surface)] via-[var(--surface)]/92 to-[var(--surface)]/45"
+        />
         <div className="relative z-10 max-w-2xl">
           <Stamp tone={statusTone(featured.status)}>
             {featuredLive ? (
@@ -96,18 +111,6 @@ export default async function HomePage() {
             </Link>
           </div>
         </div>
-
-        {/* Trophy, decoratively anchored to the hero's right edge. Hidden on
-            phones, where it would crowd the title; the section is
-            overflow-hidden so it crops rather than scrolls. */}
-        <Image
-          src="/trophy-640.png"
-          alt=""
-          aria-hidden
-          width={640}
-          height={1149}
-          className="pointer-events-none absolute -right-6 -top-8 hidden h-[19rem] w-auto opacity-90 select-none sm:block lg:h-[24rem]"
-        />
 
         {leaderInPlay ? (
           <div className="relative z-10 mt-8 inline-flex items-center gap-3 rounded-lg border border-[var(--pitch)]/40 bg-[var(--pitch-a12)] px-4 py-3">
