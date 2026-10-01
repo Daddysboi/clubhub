@@ -46,6 +46,38 @@ async function allPlayerIdsFor(tournamentId: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
+type SavedTournament = {
+  name: string;
+  slug: string;
+  description: string | null;
+  clubName: string | null;
+  venue: string | null;
+  startDate: string | null;
+  status: string;
+};
+
+/**
+ * Confirmation that reports what was actually stored, not just that a write
+ * happened.
+ *
+ * Optional fields are listed only when empty and worth flagging, so the common
+ * case stays a one-line confirmation while an organiser who expected a club
+ * name to stick can see at a glance that it did not.
+ */
+function savedMessage(t: SavedTournament | undefined): string {
+  if (!t) return "Tournament updated";
+  const missing: string[] = [];
+  if (!t.clubName) missing.push("club name");
+  if (!t.startDate) missing.push("start date");
+  if (!t.venue) missing.push("venue");
+  if (!t.description) missing.push("description");
+
+  const saved = `Saved. /${t.slug} · ${t.status}`;
+  return missing.length === 0
+    ? `${saved} — name, club, date, venue and description all stored.`
+    : `${saved} — not stored: ${missing.join(", ")}.`;
+}
+
 // ---------------- tournaments ----------------
 
 export async function saveTournament(
@@ -57,6 +89,7 @@ export async function saveTournament(
     name: String(formData.get("name") ?? ""),
     slug: String(formData.get("slug") ?? ""),
     description: String(formData.get("description") ?? ""),
+    clubName: String(formData.get("clubName") ?? ""),
     venue: String(formData.get("venue") ?? ""),
     startDate: String(formData.get("startDate") ?? ""),
     status: String(formData.get("status") ?? "draft"),
@@ -92,7 +125,25 @@ export async function saveTournament(
   if (id) {
     await db.update(tournaments).set(values).where(eq(tournaments.id, id));
     refresh(id);
-    return { ok: true, message: "Tournament updated" };
+
+    // Read the row back and name what was stored. A plain "Tournament updated"
+    // hides a field that silently failed to persist, which is how an organiser
+    // ends up staring at an empty Club name with no idea why.
+    const saved = await db
+      .select({
+        name: tournaments.name,
+        slug: tournaments.slug,
+        description: tournaments.description,
+        clubName: tournaments.clubName,
+        venue: tournaments.venue,
+        startDate: tournaments.startDate,
+        status: tournaments.status,
+      })
+      .from(tournaments)
+      .where(eq(tournaments.id, id))
+      .limit(1);
+
+    return { ok: true, message: savedMessage(saved[0]) };
   }
 
   await db.insert(tournaments).values(values);

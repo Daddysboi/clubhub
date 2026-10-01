@@ -17,6 +17,7 @@ const schema = readFileSync("supabase/schema.sql", "utf8");
 const adminActions = readFileSync("app/actions/admin.ts", "utf8");
 const listPage = readFileSync("app/admin/page.tsx", "utf8");
 const confirmDialog = readFileSync("components/ui/confirm-dialog.tsx", "utf8");
+const adminSettings = readFileSync("components/admin/AdminTournamentSettings.tsx", "utf8");
 
 /** The body of `create table ... public.<table> ( ... );`, if present. */
 function createTableBlock(table: string): string {
@@ -131,5 +132,45 @@ describe("confirm dialog text alignment", () => {
 describe("admin tab strip", () => {
   it("no longer carries an unused leading slot", () => {
     expect(listPage).not.toMatch(/Organiser panel/);
+  });
+});
+
+describe("saveTournament persists every editable field", () => {
+  const parseBlock = adminActions.slice(
+    adminActions.indexOf("tournamentSchema.safeParse"),
+    adminActions.indexOf("if (!parsed.success)"),
+  );
+
+  /**
+   * The schema is fed an explicit allow-list of `formData.get()` calls rather
+   * than the raw FormData, so any field missing from this list is silently
+   * discarded on every save. clubName was dropped from it that way: the input
+   * posted fine, the action ignored it, and the row was written back as NULL.
+   */
+  const fields = [
+    "name",
+    "slug",
+    "description",
+    "clubName",
+    "venue",
+    "startDate",
+    "status",
+  ];
+
+  for (const field of fields) {
+    it(`reads ${field} from the submitted form`, () => {
+      expect(parseBlock).toMatch(new RegExp(`${field}:\\s*String\\(formData\\.get\\("${field}"\\)`));
+    });
+  }
+
+  it("warns which optional fields failed to store", () => {
+    // A generic success message let the dropped field hide behind a green save.
+    expect(adminActions).toMatch(/not stored/);
+  });
+
+  it("uses a textarea for description in both forms", () => {
+    // The create form already had one; Settings had a single-line Input, which
+    // rendered a multi-sentence description as an unreadable run-on strip.
+    expect(adminSettings).toMatch(/<Textarea[\s\S]{0,200}?name="description"/);
   });
 });

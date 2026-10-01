@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Card, SectionHeading, Stamp } from "@/components/ui/card";
 import { TeamCrest } from "@/components/TeamCrest";
 import { deleteTournamentForm, saveTournament, setWinnerForm } from "@/app/actions/admin";
@@ -78,8 +78,11 @@ export function AdminTournamentSettings({
               </Select>
             </Field>
 
+            {/* A textarea, matching the create form: descriptions run to
+                several sentences and a single-line input rendered them as an
+                unreadable run-on strip. */}
             <Field label="Description" htmlFor="tDesc">
-              <Input
+              <Textarea
                 id="tDesc"
                 name="description"
                 defaultValue={tournament.description ?? ""}
