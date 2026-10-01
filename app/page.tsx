@@ -57,20 +57,23 @@ export default async function HomePage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:py-12">
       <section className="relative overflow-hidden rounded-xl border border-[var(--rule)] bg-[var(--surface)] p-6 sm:p-10">
-        {/* Photo behind the hero, dimmed and scrimmed from the left so the
-            title keeps full contrast on every viewport. */}
+        {/* Photo behind the hero.
+            Light, warm source frame, so it is darkened twice: the image itself
+            is knocked back, and a scrim fades in from the left so the heading
+            and buttons sit on near-solid surface while the right side keeps
+            enough of the picture to read as a photograph. */}
         <Image
-          src="/hero-bg-1920.jpg"
+          src="/steptodown.com830993.jpg"
           alt=""
           aria-hidden
           fill
           priority
           sizes="100vw"
-          className="pointer-events-none object-cover object-center opacity-45 select-none"
+          className="pointer-events-none object-cover object-center opacity-70 brightness-[0.78] saturate-[0.9] select-none"
         />
         <div
           aria-hidden
-          className="absolute inset-0 bg-gradient-to-r from-[var(--surface)] via-[var(--surface)]/92 to-[var(--surface)]/45"
+          className="absolute inset-0 bg-gradient-to-r from-[var(--surface)] via-[var(--surface)]/90 to-transparent"
         />
         <div className="relative z-10 max-w-2xl">
           <Stamp tone={statusTone(featured.status)}>
