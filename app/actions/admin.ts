@@ -136,6 +136,17 @@ export async function setWinner(_prev: ActionState, formData: FormData): Promise
   return { ok: true, message: `${team[0].name} is the champion!` };
 }
 
+/**
+ * Deletes a tournament and everything scoped to it.
+ *
+ * The cleanup is done by the schema's ON DELETE rules rather than by hand here,
+ * which keeps it in one place and impossible to get partially wrong:
+ *   teams, matches, team_players, match_events -> CASCADE
+ *   players.tournament_id                      -> SET NULL (released, not destroyed)
+ * A player is a person, not competition data, so deleting a tournament must not
+ * delete people; they reappear on /players as standalone entries. scripts/
+ * test-delete-cascade.ts asserts each of these rules against a real database.
+ */
 export async function deleteTournament(
   _prev: ActionState,
   formData: FormData,
@@ -143,8 +154,22 @@ export async function deleteTournament(
   await requireAdmin();
   const id = String(formData.get("tournamentId") ?? "");
   if (!id) return { ok: false, message: "Missing tournament" };
+
+  // Guard against deleting something that is not there, so a double submit or a
+  // stale page reports honestly instead of claiming success.
+  const existing = await db
+    .select({ id: tournaments.id })
+    .from(tournaments)
+    .where(eq(tournaments.id, id));
+  if (!existing[0]) {
+    refresh();
+    return { ok: false, message: "That tournament no longer exists." };
+  }
+
   await db.delete(tournaments).where(eq(tournaments.id, id));
-  refresh();
+  // The organiser panel is keyed by id, so it needs its own invalidation or the
+  // deleted tournament keeps rendering after the list drops it.
+  refresh(id);
   return { ok: true, message: "Tournament deleted" };
 }
 

@@ -8,6 +8,7 @@ import { listTournaments, getTournamentTeams, getTournamentMatches, getPlayersFo
 import { EmptyState, SectionHeading, Stamp } from "@/components/ui/card";
 import { formatDate } from "@/lib/format";
 import { statusLabel, statusTone } from "@/lib/tones";
+import { AdminDeleteTournament } from "@/components/admin/AdminDeleteTournament";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +119,9 @@ function TournamentTable({ stats }: { stats: Stat[] }) {
               <th scope="col" className="px-4 py-3 text-right font-semibold">Teams</th>
               <th scope="col" className="px-4 py-3 text-right font-semibold">Players</th>
               <th scope="col" className="px-4 py-3 text-right font-semibold">Fixtures</th>
+              <th scope="col" className="px-4 py-3 text-right font-semibold">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -146,19 +150,33 @@ function TournamentTable({ stats }: { stats: Stat[] }) {
                 <td className="px-4 py-3 text-right tabular-nums text-[var(--ink-2)]">{teamCount}</td>
                 <td className="px-4 py-3 text-right tabular-nums text-[var(--ink-2)]">{playerCount}</td>
                 <td className="px-4 py-3 text-right tabular-nums text-[var(--ink-2)]">{matchCount}</td>
+                <td className="px-4 py-3 text-right">
+                  <AdminDeleteTournament
+                    tournamentId={t.id}
+                    name={t.name}
+                    teamCount={teamCount}
+                    playerCount={playerCount}
+                    matchCount={matchCount}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {/* Mobile: one stacked card per tournament. */}
+      {/* Mobile: one stacked card per tournament. The link covers the text and the
+          delete button sits beside it, because nesting a button inside an anchor is
+          invalid HTML and the tap target would fight the navigation. */}
       <ul className="space-y-3 sm:hidden">
         {stats.map(({ tournament: t, teamCount, matchCount, playerCount }) => (
-          <li key={t.id}>
+          <li
+            key={t.id}
+            className="flex items-stretch gap-2 rounded-xl border border-[var(--rule)] bg-[var(--surface)]/70 p-4"
+          >
             <Link
               href={`/admin/tournaments/${t.id}`}
-              className="block rounded-xl border border-[var(--rule)] bg-[var(--surface)]/70 p-4 transition hover:border-[var(--pitch)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pitch)]/50"
+              className="min-w-0 flex-1 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pitch)]/50"
             >
               <Stamp tone={statusTone(t.status)}>{statusLabel(t.status)}</Stamp>
               <span className="mt-2 block font-semibold text-[var(--ink)]">{t.name}</span>
@@ -169,6 +187,15 @@ function TournamentTable({ stats }: { stats: Stat[] }) {
                 {teamCount} teams · {playerCount} players · {matchCount} fixtures
               </span>
             </Link>
+            <div className="flex shrink-0 items-start">
+              <AdminDeleteTournament
+                tournamentId={t.id}
+                name={t.name}
+                teamCount={teamCount}
+                playerCount={playerCount}
+                matchCount={matchCount}
+              />
+            </div>
           </li>
         ))}
       </ul>

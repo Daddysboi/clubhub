@@ -60,7 +60,14 @@ node --experimental-strip-types scripts/apply-schema.ts
 ```
 
 Helper scripts in `scripts/` can create or delete an admin account, verify the
-connection, and inspect the schema.
+connection, and inspect the schema:
+
+| Script | Purpose |
+| --- | --- |
+| `npx tsx scripts/check-db.ts` | Verify the connection and list tables |
+| `npx tsx scripts/check-cascade.ts` | Print every foreign key's ON DELETE rule |
+| `npx tsx scripts/test-delete-cascade.ts` | Prove tournament deletion cleans up (rolled back) |
+| `npx tsx scripts/create-admin.ts <email> <password>` | Create or reset the organiser login |
 
 ## Scripts
 
