@@ -1,36 +1,93 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ClubHub
 
-## Getting Started
+Tournament and cup management for admins, teams and players.
 
-First, run the development server:
+ClubHub is a self-hosted platform for running football cups and leagues. Organisers
+create tournaments, approve team signups, register squads, and manage fixtures and
+scorers. Players and supporters browse live brackets, results, standings, and player
+profiles.
+
+Built with Next.js (App Router), Postgres, Drizzle ORM, and Supabase.
+
+## Features
+
+- **Tournaments** — create competitions, set dates and status, publish brackets.
+- **Signups** — teams request to join a tournament; organisers approve or reject.
+- **Squads** — register players, set kit colours and crests, manage transfers.
+- **Fixtures & scoring** — schedule matches, record goals and assists, track results live.
+- **Standings & stats** — league tables, top scorers, and per-tournament statistics.
+- **Admin panel** — password-protected area for managing teams, matches, and settings.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Framework | Next.js 16 (App Router), React, TypeScript |
+| Database | Postgres via `postgres-js`, schema managed by Drizzle |
+| Auth | Supabase Auth sessions, admin-only route protection in `proxy.ts` |
+| Storage | Supabase Storage for crests and logos |
+| Styling | Tailwind CSS |
+| Tests | Vitest |
+
+## Getting started
 
 ```bash
+npm install
+cp .env.local.example .env.local   # then fill in the values
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.local.example` to `.env.local` and fill in the values. `.env.local` is
+git-ignored and must never be committed.
 
-## Learn More
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Postgres connection string used by the app. On serverless hosts such as Vercel, use the **transaction pooler** (port `6543`). |
+| `DIRECT_URL` | Direct Postgres connection, used by migrations (port `5432`). |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key for server-side admin operations. |
 
-To learn more about Next.js, take a look at the following resources:
+### Database setup
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The schema lives in `supabase/schema.sql`. Apply it with:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+node --experimental-strip-types scripts/apply-schema.ts
+```
 
-## Deploy on Vercel
+Helper scripts in `scripts/` can create or delete an admin account, verify the
+connection, and inspect the schema.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Scripts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start the dev server |
+| `npm run build` | Production build |
+| `npm run start` | Serve the production build |
+| `npm run check` | Typecheck, lint, and run tests |
+| `npm run test` | Run tests only |
+| `npm run typecheck` | TypeScript only |
+| `npm run lint` | ESLint only |
+
+## Deploying
+
+Import the repository into [Vercel](https://vercel.com); the framework preset and
+build command are detected automatically. Add the four environment variables above in
+**Settings → Environment Variables** before the first deploy.
+
+## Project structure
+
+```
+app/            routes, pages, server actions
+components/     shared UI, admin panels
+lib/            database, auth, formatting, validation, stats
+public/         static assets and icons
+scripts/        schema and admin helper scripts
+supabase/       schema SQL
+tests/          Vitest unit tests
+```

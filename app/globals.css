@@ -1,26 +1,158 @@
 @import "tailwindcss";
+@import "../lib/tokens.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/* Map tokens to Tailwind utilities. The values stay in tokens.css. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-pitch: var(--pitch);
+  --color-live: var(--live);
+  --color-warn: var(--warn);
+  --color-trophy: var(--trophy);
+  --color-info: var(--info);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased}
+
+::selection {
+  background: var(--pitch);
+  color: var(--accent-ink);
+}
+
+.thin-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+  border-radius: 999px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Ledger ruling rhythm behind empty states. */
+.ruling {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--rule) 0 1px,
+    transparent 1px 32px
+  );
+}
+
+/* ============================================================
+   Mobile foundation — ported from the southward-hospital standard.
+   Order matters: later blocks win.
+   ============================================================ */
+
+/* 1. Never let a wide child scroll the page sideways. */
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* 2. Hide scrollbars on horizontal chip/tab rails. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* 3. Safe-area padding so content clears the home indicator / notch. */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.pl-safe {
+  padding-left: env(safe-area-inset-left);
+}
+.pr-safe {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* 4. vh -> dvh. iOS Safari and Android Chrome resize the viewport when
+      the on-screen keyboard opens; vh does not, so sheets get clipped. */
+@supports (height: 100dvh) {
+  .min-h-screen {
+    min-height: 100dvh;
+  }
+  .h-screen {
+    height: 100dvh;
+  }
+  .max-h-\[85dvh\] {
+    max-height: 85dvh;
+  }
+  .max-h-\[90dvh\] {
+    max-height: 90dvh;
+  }
+}
+
+/* 5. Compaction floor. Declared outside @layer so it beats Tailwind's
+      utilities: any desktop-first p-6 / gap-6 / text-4xl collapses to a
+      16px / 1rem / 24px value on a phone without touching the component. */
+@media (max-width: 639px) {
+  .p-5,
+  .p-6,
+  .p-8 {
+    padding: 1rem;
+  }
+  .px-5,
+  .px-6,
+  .px-8 {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  .py-5,
+  .py-6,
+  .py-8 {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+  .gap-5,
+  .gap-6,
+  .gap-8 {
+    gap: 1rem;
+  }
+  .mt-8,
+  .mb-8 {
+    margin-top: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .mt-10 {
+    margin-top: 1.5rem;
+  }
+  .text-3xl,
+  .text-4xl,
+  .text-5xl {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+  /* Keep every form control at the 44px touch floor even if a card
+     compaction rule shrinks its padding. */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: 44px;
+  }
 }

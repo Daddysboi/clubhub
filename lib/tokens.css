@@ -1,0 +1,71 @@
+/* ============================================================
+   CupShub design tokens — THE single source of truth.
+   Change a value here and every surface updates.
+   Never hardcode a colour in a component className.
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- surfaces ---- */
+  --paper: #0b1220; /* the single canvas */
+  --surface: #131c2e; /* cards, wells, sheets */
+  --sunken: #1e293b; /* hover wells, disabled zones */
+
+  /* ---- rules (dividers) ----
+     --rule       decorative dividers only (hairline weight)
+     --rule-strong interactive control boundaries only (meets WCAG 3:1) */
+  --rule: #22304a;
+  --rule-strong: #3f5170;
+
+  /* ---- ink ---- */
+  --ink: #ffffff; /* primary text */
+  --ink-2: #cbd5e1; /* secondary text */
+  --ink-3: #94a3b8; /* captions */
+
+  /* ---- brand: pitch green ----
+     FILL colour only. Ink on green must be --accent-ink, never white. */
+  --pitch: #22c55e;
+  --pitch-hover: #16a34a;
+  --accent-ink: #04180b;
+
+  /* ---- semantics ---- */
+  --live: #ef4444; /* in play */
+  --live-tint: rgb(239 68 68 / 0.14);
+  --warn: #f59e0b; /* pending / scheduled */
+  --warn-tint: rgb(245 158 11 / 0.14);
+  --trophy: #eab308; /* champion */
+  --trophy-tint: rgb(234 179 8 / 0.14);
+  --info: #38bdf8;
+  --info-tint: rgb(56 189 248 / 0.14);
+
+  /* ---- alpha variants (single declaration site each) ---- */
+  --pitch-a12: rgb(34 197 94 / 0.12);
+  --pitch-a18: rgb(34 197 94 / 0.18);
+  --pitch-a35: rgb(34 197 94 / 0.35);
+  --surface-a85: rgb(19 28 46 / 0.85);
+  --neutral-a45: rgb(0 0 0 / 0.45);
+
+  /* ---- team kit colours (seed defaults) ---- */
+  --kit-1: #22c55e;
+  --kit-2: #3b82f6;
+  --kit-3: #f59e0b;
+  --kit-4: #ec4899;
+
+  /* ---- radii ---- */
+  --radius-md: 6px; /* inner controls */
+  --radius-lg: 8px; /* buttons, inputs */
+  --radius-xl: 12px; /* cards, sheets */
+
+  /* ---- motion ---- */
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --ease: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+  }
+}
