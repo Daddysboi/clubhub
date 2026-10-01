@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
   getStandings,
@@ -95,6 +96,18 @@ export default async function HomePage() {
             </Link>
           </div>
         </div>
+
+        {/* Trophy, decoratively anchored to the hero's right edge. Hidden on
+            phones, where it would crowd the title; the section is
+            overflow-hidden so it crops rather than scrolls. */}
+        <Image
+          src="/trophy-640.png"
+          alt=""
+          aria-hidden
+          width={640}
+          height={1149}
+          className="pointer-events-none absolute -right-6 -top-8 hidden h-[19rem] w-auto opacity-90 select-none sm:block lg:h-[24rem]"
+        />
 
         {leaderInPlay ? (
           <div className="relative z-10 mt-8 inline-flex items-center gap-3 rounded-lg border border-[var(--pitch)]/40 bg-[var(--pitch-a12)] px-4 py-3">
