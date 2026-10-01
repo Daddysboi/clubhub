@@ -41,9 +41,6 @@ export default async function AdminPage({
     <div className="mx-auto max-w-5xl px-4 py-8">
       <AdminTabs
         initial="tournaments"
-        leading={
-          <p className="shrink-0 text-sm text-[var(--ink-3)]">Organiser panel</p>
-        }
         trailing={
           <div className="flex items-center gap-3">
             <span className="max-w-[14rem] truncate text-xs text-[var(--ink-3)] sm:max-w-none">

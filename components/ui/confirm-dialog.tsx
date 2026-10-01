@@ -81,6 +81,10 @@ export function ConfirmDialog({
         className={cn(
           "m-auto w-[calc(100vw-2rem)] max-w-sm rounded-xl border border-[var(--rule)]",
           "bg-[var(--surface)] p-0 text-[var(--ink)] shadow-xl backdrop:bg-black/50",
+          // Dialogs render in place in the DOM, so they inherit text-align from
+          // whatever triggered them — a right-aligned table cell would drag the
+          // body copy with it. Reset it here rather than at each call site.
+          "text-left",
         )}
       >
         <div className="p-5">

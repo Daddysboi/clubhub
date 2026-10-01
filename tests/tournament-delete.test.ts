@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 const schema = readFileSync("supabase/schema.sql", "utf8");
 const adminActions = readFileSync("app/actions/admin.ts", "utf8");
 const listPage = readFileSync("app/admin/page.tsx", "utf8");
+const confirmDialog = readFileSync("components/ui/confirm-dialog.tsx", "utf8");
 
 /** The body of `create table ... public.<table> ( ... );`, if present. */
 function createTableBlock(table: string): string {
@@ -111,5 +112,24 @@ describe("tournament list offers a delete control", () => {
     const mobileBlock = listPage.slice(listPage.indexOf("sm:hidden"));
     const anchor = mobileBlock.slice(mobileBlock.indexOf("<Link"), mobileBlock.indexOf("</Link>"));
     expect(anchor).not.toMatch(/AdminDeleteTournament/);
+  });
+});
+
+describe("confirm dialog text alignment", () => {
+  it("pins the dialog to text-left", () => {
+    // The dialog renders in place in the DOM, so it inherits text-align from its
+    // trigger. The trigger sits in a text-right table cell, which dragged the
+    // body copy right with it.
+    expect(confirmDialog).toMatch(/text-left/);
+  });
+
+  it("keeps the footer buttons right-aligned regardless", () => {
+    expect(confirmDialog).toMatch(/justify-end/);
+  });
+});
+
+describe("admin tab strip", () => {
+  it("no longer carries an unused leading slot", () => {
+    expect(listPage).not.toMatch(/Organiser panel/);
   });
 });

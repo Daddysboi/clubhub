@@ -24,13 +24,10 @@ export type AdminTab = {
 export function AdminTabs({
   tabs,
   initial,
-  leading,
   trailing,
 }: {
   tabs: AdminTab[];
   initial?: string;
-  /** Rendered before the tab strip, on the same row. */
-  leading?: ReactNode;
   /** Rendered after the tab strip, on the same row. */
   trailing?: ReactNode;
 }) {
@@ -38,11 +35,9 @@ export function AdminTabs({
 
   return (
     <div>
-      {/* One row: optional leading node, tabs, optional trailing node. The
-          trailing item is pushed right with ml-auto so the tabs stay left
-          aligned even when leading is absent. */}
+      {/* One row: tabs, then an optional trailing node pushed right with ml-auto
+          so the tabs stay left aligned. */}
       <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2">
-        {leading}
         <div
           role="tablist"
           aria-label="Tournament admin sections"
