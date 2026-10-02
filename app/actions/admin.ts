@@ -10,6 +10,7 @@ import { roundRobinPairings } from "@/lib/standings";
 import {
   assignSchema,
   roleSchema,
+  classifyDuplicate,
   firstError,
   matchSchema,
   playerEditSchema,
@@ -393,7 +394,20 @@ export async function editPlayer(_prev: ActionState, formData: FormData): Promis
     excludeId: data.playerId,
   });
   if (duplicate) {
-    return { ok: false, message: "Another player already uses that name or nickname." };
+    const verdict = classifyDuplicate({
+      fullName: data.fullName,
+      nickname: data.nickname,
+      existing: duplicate,
+    });
+    if (verdict.kind === "nickname-taken") {
+      return { ok: false, message: `The nickname "${verdict.nickname}" is already taken.` };
+    }
+    if (verdict.kind === "name-taken") {
+      return {
+        ok: false,
+        message: `"${verdict.name}" is already used by another player. Give this one a nickname so they can be told apart.`,
+      };
+    }
   }
 
   await db

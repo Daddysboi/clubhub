@@ -74,7 +74,7 @@ export function SignupForm({
         <Field
           label="Nickname / known name"
           htmlFor="nickname"
-          hint="What people call you on the pitch — optional, but must be unique"
+          hint="What people call you on the pitch — optional, but needed if someone already has this name"
           error={state.fieldErrors?.nickname?.[0]}
         >
           <Input

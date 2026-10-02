@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/db/auth";
 import { players, tournaments } from "@/lib/db/schema";
 import { findDuplicatePlayer } from "@/lib/db/queries";
-import { firstError, signupSchema } from "@/lib/validation";
+import { classifyDuplicate, firstError, signupSchema } from "@/lib/validation";
 
 export type ActionState = {
   ok: boolean;
@@ -81,16 +81,27 @@ async function registerPlayer(formData: FormData): Promise<ActionState> {
   });
 
   if (duplicate) {
-    const nicknameClash =
-      duplicate.fullName.trim().toLowerCase() !== data.fullName.trim().toLowerCase();
+    const verdict = classifyDuplicate({
+      fullName: data.fullName,
+      nickname: data.nickname,
+      existing: duplicate,
+    });
 
-    return {
-      ok: false,
-      message: nicknameClash
-        ? `The nickname "${(data.nickname ?? "").trim()}" is already taken. Please choose another.`
-        : `"${data.fullName.trim()}" is already registered. One entry per person.`,
-      fieldErrors: { [nicknameClash ? "nickname" : "fullName"]: ["Already registered"] },
-    };
+    if (verdict.kind === "nickname-taken") {
+      return {
+        ok: false,
+        message: `The nickname "${verdict.nickname}" is already taken. Please choose another.`,
+        fieldErrors: { nickname: ["Already taken"] },
+      };
+    }
+
+    if (verdict.kind === "name-taken") {
+      return {
+        ok: false,
+        message: `"${verdict.name}" is already on this list. Add a nickname so players can tell you apart.`,
+        fieldErrors: { nickname: ["Needed because that name is taken"] },
+      };
+    }
   }
 
   const inserted = await db

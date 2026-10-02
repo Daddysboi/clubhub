@@ -131,6 +131,53 @@ export const eventSchema = z.object({
 
 export type EventInput = z.infer<typeof eventSchema>;
 
+export type DuplicateVerdict =
+  | { kind: "allow" }
+  | { kind: "nickname-taken"; nickname: string }
+  | { kind: "name-taken"; name: string };
+
+/**
+ * Decide whether a submitted player collides with an existing row.
+ *
+ * Names are not unique in the real world, so a shared name is allowed. The
+ * nickname is the unique handle instead: the team sheet and scorer board both
+ * key off it, so two players must never share one.
+ *
+ * When the name is taken and either side has no nickname, the two rows cannot
+ * be told apart, so the entry is rejected and the person is asked for a
+ * nickname. Supplying a different one clears the clash.
+ */
+export function classifyDuplicate(input: {
+  fullName: string;
+  nickname?: string | null;
+  existing: { fullName: string; nickname?: string | null };
+}): DuplicateVerdict {
+  // Collapse internal runs of whitespace so "Temitope   Yusuf" is recognised
+  // as the same person as "Temitope Yusuf" even though storage only trims.
+  const norm = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+
+  const name = norm(input.fullName);
+  const nick = input.nickname ? norm(input.nickname) : null;
+  const theirName = norm(input.existing.fullName);
+  const theirNick = input.existing.nickname ? norm(input.existing.nickname) : null;
+
+  // Same nickname is the same person, regardless of how the name is spelled.
+  if (nick && theirNick && nick === theirNick) {
+    return { kind: "nickname-taken", nickname: input.nickname?.trim() ?? "" };
+  }
+
+  if (name === theirName) {
+    // Both sides carry a nickname and they differ, so these are two different
+    // people who happen to share a name. Allowed.
+    if (nick && theirNick) return { kind: "allow" };
+    return { kind: "name-taken", name: input.fullName.trim() };
+  }
+
+  // Neither field actually collides. Unreachable when the caller only passes a
+  // row it matched on name or nickname, but kept so the helper is total.
+  return { kind: "allow" };
+}
+
 export function firstError(errors: Record<string, string[] | undefined>) {
   for (const message of Object.values(errors)) {
     if (message && message[0]) return message[0];
