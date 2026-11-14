@@ -14,6 +14,7 @@ import { AdminPlayers } from "@/components/admin/AdminPlayers";
 import { AdminTeams } from "@/components/admin/AdminTeams";
 import { AdminFixtures } from "@/components/admin/AdminFixtures";
 import { AdminTournamentSettings } from "@/components/admin/AdminTournamentSettings";
+import { AdminMatchEvents } from "@/components/admin/AdminMatchEvents";
 import { AdminLiveStats } from "@/components/admin/AdminLiveStats";
 import { AdminTabs } from "@/components/admin/AdminTabs";
 import { SignOutButton } from "@/components/SignOutButton";
@@ -130,6 +131,44 @@ export default async function AdminTournamentPage({
                 events={eventsByMatch}
               />
             ),
+          },
+          {
+            id: "events",
+            label: "Events",
+            badge: eventRows.length,
+            content:
+              matches.length === 0 ? (
+                <Card className="p-6 text-center text-sm text-[var(--ink-3)]">
+                  Add a fixture in the Fixtures tab first, then record goals, cards and
+                  substitutions here.
+                </Card>
+              ) : (
+                <section className="space-y-4">
+                  {matches.map((m) => {
+                    const home = teams.find((t) => t.id === m.homeTeamId);
+                    const away = teams.find((t) => t.id === m.awayTeamId);
+                    return (
+                      <Card key={m.id} className="p-4">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-[var(--ink)]">
+                            {home?.name ?? "—"} vs {away?.name ?? "—"}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-[var(--ink-3)]">Round {m.round}</span>
+                            <Stamp tone={statusTone(m.status)}>{statusLabel(m.status)}</Stamp>
+                          </div>
+                        </div>
+                        <AdminMatchEvents
+                          match={m}
+                          teams={teams}
+                          players={players}
+                          events={eventsByMatch[m.id] ?? []}
+                        />
+                      </Card>
+                    );
+                  })}
+                </section>
+              ),
           },
           {
             id: "settings",

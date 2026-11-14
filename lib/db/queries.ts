@@ -13,6 +13,7 @@ import {
   type TeamWithCaptain,
 } from "./schema";
 import { computeStandings, type Standings } from "../standings";
+import { isUuid } from "../format";
 import {
   bestAttack,
   bestDefence,
@@ -41,6 +42,9 @@ export async function getTournamentBySlug(slug: string) {
 }
 
 export async function getTournamentById(id: string) {
+  // A malformed route param would otherwise reach Postgres and blow up with
+  // "invalid input syntax for type uuid".
+  if (!isUuid(id)) return null;
   const rows = await db.select().from(tournaments).where(eq(tournaments.id, id)).limit(1);
   return rows[0] ?? null;
 }
