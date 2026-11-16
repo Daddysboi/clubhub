@@ -16,6 +16,7 @@ import { TeamCrest } from "@/components/TeamCrest";
 import { PlayerRow } from "@/components/PlayerRow";
 import { ScorerBoard } from "@/components/ScorerBoard";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { groupTopScorers } from "@/lib/stats";
 import { statusLabel, statusTone } from "@/lib/tones";
 import type { Team, Match, Player } from "@/lib/db/schema";
 
@@ -133,11 +134,18 @@ export default async function TournamentPage({ params }: { params: Promise<{ slu
                 <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--pitch)]">
                   Golden Boot
                 </p>
-                <p className="mt-2 text-lg font-black text-[var(--ink)]">{goldenBoot.player.fullName}</p>
+                <p className="mt-2 text-lg font-black text-[var(--ink)]">
+                  {goldenBoot.player.fullName}
+                </p>
                 <p className="text-sm text-[var(--ink-3)]">
                   {goldenBoot.goals} {goldenBoot.goals === 1 ? "goal" : "goals"}
                   {goldenBoot.teamName ? ` · ${goldenBoot.teamName}` : ""}
                 </p>
+                {groupTopScorers(stats.scorers)[0]?.length > 1 && (
+                  <p className="text-xs text-[var(--ink-3)] mt-1">
+                    Joint leaders with {groupTopScorers(stats.scorers)[0].length} players on {goldenBoot.goals} goals
+                  </p>
+                )}
               </Card>
             ) : null}
 
