@@ -52,7 +52,7 @@ export default async function TournamentPage({ params }: { params: Promise<{ slu
   }
   const rounds = [...byRound.entries()].sort((a, b) => a[0] - b[0]);
   const assigned = roster.filter((p) => p.teamId).length;
-  const goldenBoot = stats.scorers[0] ?? null;
+  const goldenBoot = groupTopScorers(stats.scorers)[0] ?? null;
 
   // Event lookup per match, only for matches that are finished or live.
   const eventMap = new Map<string, Awaited<ReturnType<typeof getMatchEvents>>>();
@@ -135,15 +135,15 @@ export default async function TournamentPage({ params }: { params: Promise<{ slu
                   Golden Boot
                 </p>
                 <p className="mt-2 text-lg font-black text-[var(--ink)]">
-                  {goldenBoot.player.fullName}
+                  {goldenBoot.map((p) => p.player.fullName).join(" & ")}
                 </p>
                 <p className="text-sm text-[var(--ink-3)]">
-                  {goldenBoot.goals} {goldenBoot.goals === 1 ? "goal" : "goals"}
-                  {goldenBoot.teamName ? ` · ${goldenBoot.teamName}` : ""}
+                  {goldenBoot[0].goals} {goldenBoot[0].goals === 1 ? "goal" : "goals"}
+                  {goldenBoot[0].teamName ? ` · ${goldenBoot[0].teamName}` : ""}
                 </p>
                 {groupTopScorers(stats.scorers)[0]?.length > 1 && (
                   <p className="text-xs text-[var(--ink-3)] mt-1">
-                    Joint leaders with {groupTopScorers(stats.scorers)[0].length} players on {goldenBoot.goals} goals
+                    Joint leaders with {groupTopScorers(stats.scorers)[0].length} players on {goldenBoot[0].goals} goals
                   </p>
                 )}
               </Card>
