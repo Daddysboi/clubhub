@@ -152,40 +152,6 @@ function applyEvent(row: PlayerStatRow, type: EventType) {
 }
 
 /**
- * Golden Boot ladder. Ranked by goals, then fewer penalties scored,
- * then fewer appearances, then name. Only players with at least one goal
- * are eligible — a zero-goal "winner" is never meaningful.
- */
-export function topScorers(stats: PlayerStatRow[], limit = 10): TopScorer[] {
-  return stats
-    .filter((s) => s.goals > 0)
-    .sort(
-      (a, b) =>
-        b.goals - a.goals ||
-        a.penalties - b.penalties ||
-        a.appearances - b.appearances ||
-        a.player.fullName.localeCompare(b.player.fullName),
-    )
-    // Rank before slicing so a truncated ladder still reads 1, 2, 3.
-    .map((s, i) => ({ ...s, rank: i + 1 }))
-    .slice(0, limit);
-}
-
-/** Card ladder: most card points first. */
-export function cardLeaders(stats: PlayerStatRow[], limit = 10) {
-  return stats
-    .filter((s) => s.yellowCards + s.redCards > 0)
-    .sort(
-      (a, b) =>
-        b.cardPoints - a.cardPoints ||
-        b.redCards - a.redCards ||
-        b.yellowCards - a.yellowCards ||
-        a.player.fullName.localeCompare(b.player.fullName),
-    )
-    .slice(0, limit);
-}
-
-/**
  * Team-level derived stats. A clean sheet = finished match, 0 conceded.
  *
  * Discipline totals are aggregated from `events` when supplied; without them
@@ -272,6 +238,77 @@ export function computeTeamStats(
   return [...rows.values()];
 }
 
+/**
+ * Golden Boot ladder. Ranked by goals, then fewer penalties,
+ * then fewer appearances, then name. Only players with at least one goal
+ * are eligible — a zero-goal "winner" is never meaningful.
+ * Returns the full ranked list; callers decide how to display ties.
+ */
+export function topScorers(stats: PlayerStatRow[], limit = 10): TopScorer[] {
+  return stats
+    .filter((s) => s.goals > 0)
+    .sort(
+      (a, b) =>
+        b.goals - a.goals ||
+        a.penalties - b.penalties ||
+        a.appearances - b.appearances ||
+        a.player.fullName.localeCompare(b.player.fullName),
+    )
+    // Rank before slicing so a truncated ladder still reads 1, 2, 3.
+    .map((s, i) => ({ ...s, rank: i + 1 }))
+    .slice(0, limit);
+}
+
+/** Group the top-scoring players who are tied on goals (and penalties).
+ *  Returns an array of groups; each group is an array of TopScorer objects
+ *  who share the same goal/penalty total. The first group is the "joint"
+ *  winners, the second group are the next-best, etc.
+ */
+export function groupTopScorers(scorers: TopScorer[]): readonly TopScorer[][] {
+  if (scorers.length === 0) return [];
+  const groups: TopScorer[][] = [];
+  let i = 0;
+  while (i < scorers.length) {
+    const goalCount = scorers[i].goals;
+    const penCount = scorers[i].penalties;
+    const group: TopScorer[] = [];
+    while (i < scorers.length && scorers[i].goals === goalCount && scorers[i].penalties === penCount) {
+      group.push(scorers[i]);
+      i++;
+    }
+    groups.push(group);
+  }
+  return groups;
+}
+
+/** Card ladder: most card points first. */
+export function cardLeaders(stats: PlayerStatRow[], limit = 10) {
+  return stats
+    .filter((s) => s.yellowCards + s.redCards > 0)
+    .sort(
+      (a, b) =>
+        b.cardPoints - a.cardPoints ||
+        b.redCards - a.redCards ||
+        b.yellowCards - a.yellowCards ||
+        a.player.fullName.localeCompare(b.player.fullName),
+    )
+    .slice(0, limit);
+}
+
+/** Best defensive record = fewest goals conceded. Returns ALL teams tied at the top. */
+export function bestDefenceGrouped(teamStats: TeamStatRow[]): TeamStatRow[] {
+  if (teamStats.length === 0) return [];
+  const minConceded = Math.min(...teamStats.map((t) => t.goalsConceded));
+  return teamStats.filter((t) => t.goalsConceded === minConceded);
+}
+
+/** Best attacking record = most goals scored. Returns ALL teams tied at the top. */
+export function bestAttackGrouped(teamStats: TeamStatRow[]): TeamStatRow[] {
+  if (teamStats.length === 0) return [];
+  const maxGoals = Math.max(...teamStats.map((t) => t.goalsScored));
+  return teamStats.filter((t) => t.goalsScored === maxGoals);
+}
+
 /** Best defensive record = fewest goals conceded. */
 export function bestDefence(teamStats: TeamStatRow[]) {
   if (teamStats.length === 0) return null;
@@ -313,7 +350,7 @@ export function sortEvents(events: MatchEvent[]): MatchEvent[] {
   return [...events].sort(
     (a, b) => (a.minute ?? 999) - (b.minute ?? 999) || (priority[a.type] ?? 9) - (priority[b.type] ?? 9),
   );
-}
+};
 
 /** Human label + tone for an event type. Single source of truth. */
 export const EVENT_LABEL: Record<EventType, string> = {
