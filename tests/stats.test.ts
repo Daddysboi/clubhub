@@ -1,9 +1,12 @@
 import type { Match, MatchEvent, Team } from "@/lib/db/schema";
 import {
   bestAttack,
+  bestAttackGrouped,
   bestDefence,
+  bestDefenceGrouped,
   computePlayerStats,
   computeTeamStats,
+  groupTopScorers,
   topScorers,
   type PlayerStatRow,
   type TeamStatRow,
@@ -286,6 +289,48 @@ describe("bestAttack / bestDefence", () => {
   });
 });
 
+describe("bestAttackGrouped / bestDefenceGrouped", () => {
+  it("returns no winners when there are no teams", () => {
+    expect(bestAttackGrouped([])).toEqual([]);
+    expect(bestDefenceGrouped([])).toEqual([]);
+  });
+
+  it("returns every team tied on goals scored", () => {
+    const a = team("A");
+    const b = team("B");
+    const c = team("C");
+    // A: 2 + 1 = 3, B: 1 + 2 = 3, C: 0 + 0 = 0.
+    const rows = computeTeamStats(
+      [a, b, c],
+      [match(a, c, 2, 0), match(b, a, 1, 1), match(c, b, 0, 2)],
+    );
+
+    expect(bestAttackGrouped(rows).map((r) => r.team.name).sort()).toEqual(["A", "B"]);
+  });
+
+  it("returns every team tied on goals conceded", () => {
+    const a = team("A");
+    const b = team("B");
+    const c = team("C");
+    // A concedes 1, B concedes 1, C concedes 4.
+    const rows = computeTeamStats(
+      [a, b, c],
+      [match(a, c, 2, 1), match(b, c, 2, 1)],
+    );
+
+    expect(bestDefenceGrouped(rows).map((r) => r.team.name).sort()).toEqual(["A", "B"]);
+  });
+
+  it("still returns a single winner when there is no tie", () => {
+    const a = team("A");
+    const b = team("B");
+    const rows = computeTeamStats([a, b], [match(a, b, 4, 1)]);
+
+    expect(bestAttackGrouped(rows).map((r) => r.team.name)).toEqual(["A"]);
+    expect(bestDefenceGrouped(rows).map((r) => r.team.name)).toEqual(["A"]);
+  });
+});
+
 describe("computePlayerStats", () => {
   const roster = [
     { id: "p1", fullName: "Ada Nwosu", nickname: "Ada", position: "Forward" },
@@ -498,5 +543,81 @@ describe("topScorers", () => {
     });
 
     expect(topScorers(rows)).toHaveLength(10);
+  });
+});
+
+describe("groupTopScorers", () => {
+  const roster = [
+    { id: "p1", fullName: "Ada Nwosu", nickname: null, position: "Forward" },
+    { id: "p2", fullName: "Ben Osei", nickname: null, position: "Forward" },
+    { id: "p3", fullName: "Cara Lim", nickname: null, position: "Forward" },
+  ];
+  const membership = new Map([
+    ["p1", "team-a"],
+    ["p2", "team-a"],
+    ["p3", "team-b"],
+  ]);
+  const teamNames = new Map([
+    ["team-a", "Team A"],
+    ["team-b", "Team B"],
+  ]);
+
+  function run(events: MatchEvent[]) {
+    return groupTopScorers(
+      topScorers(
+        computePlayerStats({
+          players: roster,
+          events,
+          finishedMatchIds: new Set(["m1"]),
+          membership,
+          teamNames,
+        }),
+      ),
+    );
+  }
+
+  it("returns no groups with no scorers", () => {
+    expect(groupTopScorers([])).toEqual([]);
+  });
+
+  it("puts players tied on goals in the same leading group", () => {
+    const groups = run([
+      event("m1", "team-a", "p1", "goal", 5),
+      event("m1", "team-a", "p2", "goal", 10),
+      event("m1", "team-b", "p3", "goal", 15),
+    ]);
+
+    // Ada, Ben and Cara all have one goal, so they share the Golden Boot.
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(3);
+  });
+
+  it("separates the next-best scorers into their own group", () => {
+    const groups = run([
+      event("m1", "team-a", "p1", "goal", 5),
+      event("m1", "team-a", "p1", "goal", 6),
+      event("m1", "team-a", "p2", "goal", 10),
+      event("m1", "team-b", "p3", "goal", 15),
+      event("m1", "team-b", "p3", "goal", 20),
+    ]);
+
+    expect(groups.map((g) => g.map((s) => s.player.fullName))).toEqual([
+      ["Ada Nwosu", "Cara Lim"],
+      ["Ben Osei"],
+    ]);
+  });
+
+  it("does not group players whose penalty count differs", () => {
+    const groups = run([
+      event("m1", "team-a", "p1", "goal", 5),
+      event("m1", "team-a", "p2", "goal", 10),
+      event("m1", "team-b", "p3", "penalty_goal", 15),
+    ]);
+
+    // Ben's open-play goal outranks Cara's penalty on the tie-break.
+    expect(groups.map((g) => g.map((s) => s.player.fullName))).toEqual([
+      ["Ada Nwosu", "Ben Osei"],
+      ["Cara Lim"],
+    ]);
   });
 });

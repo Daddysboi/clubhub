@@ -16,7 +16,7 @@ import { TeamCrest } from "@/components/TeamCrest";
 import { PlayerRow } from "@/components/PlayerRow";
 import { ScorerBoard } from "@/components/ScorerBoard";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { groupTopScorers } from "@/lib/stats";
+import { bestAttackGrouped, bestDefenceGrouped, groupTopScorers } from "@/lib/stats";
 import { statusLabel, statusTone } from "@/lib/tones";
 import type { Team, Match, Player } from "@/lib/db/schema";
 
@@ -53,6 +53,12 @@ export default async function TournamentPage({ params }: { params: Promise<{ slu
   const rounds = [...byRound.entries()].sort((a, b) => a[0] - b[0]);
   const assigned = roster.filter((p) => p.teamId).length;
   const goldenBoot = groupTopScorers(stats.scorers)[0] ?? null;
+
+  // Awards only make sense once at least one match has been played, otherwise
+  // every team is "tied" on zero goals for and against.
+  const hasResults = stats.standings.some((row) => row.played > 0);
+  const bestAttackTeams = hasResults ? bestAttackGrouped(stats.teamStats) : [];
+  const bestDefenceTeams = hasResults ? bestDefenceGrouped(stats.teamStats) : [];
 
   // Event lookup per match, only for matches that are finished or live.
   const eventMap = new Map<string, Awaited<ReturnType<typeof getMatchEvents>>>();
@@ -124,7 +130,7 @@ export default async function TournamentPage({ params }: { params: Promise<{ slu
       ) : null}
 
       {/* Awards row: Golden Boot + best attack + best defence */}
-      {(goldenBoot || stats.bestAttack || stats.bestDefence) ? (
+      {(goldenBoot || bestAttackTeams.length > 0 || bestDefenceTeams.length > 0) ? (
         <section className="mt-8">
           <SectionHeading title="Awards & records" eyebrow="Who won what" />
           <div className="grid gap-4 sm:grid-cols-3">
@@ -141,42 +147,54 @@ export default async function TournamentPage({ params }: { params: Promise<{ slu
                   {goldenBoot[0].goals} {goldenBoot[0].goals === 1 ? "goal" : "goals"}
                   {goldenBoot[0].teamName ? ` · ${goldenBoot[0].teamName}` : ""}
                 </p>
-                {groupTopScorers(stats.scorers)[0]?.length > 1 && (
+                {goldenBoot.length > 1 && (
                   <p className="text-xs text-[var(--ink-3)] mt-1">
-                    Joint leaders with {groupTopScorers(stats.scorers)[0].length} players on {goldenBoot[0].goals} goals
+                    Joint leaders with {goldenBoot.length} players on {goldenBoot[0].goals} goals
                   </p>
                 )}
               </Card>
             ) : null}
 
-            {stats.bestAttack ? (
+            {bestAttackTeams.length > 0 ? (
               <Card className="relative overflow-hidden p-5">
                 <StatusSpine tone="info" />
                 <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--info)]">
                   Best attack
                 </p>
                 <p className="mt-2 text-lg font-black text-[var(--ink)]">
-                  {stats.bestAttack.team.name}
+                  {bestAttackTeams.map((t) => t.team.name).join(" & ")}
                 </p>
                 <p className="text-sm text-[var(--ink-3)]">
-                  {stats.bestAttack.goalsScored} goals scored
+                  {bestAttackTeams[0].goalsScored} goals scored
                 </p>
+                {bestAttackTeams.length > 1 && (
+                  <p className="text-xs text-[var(--ink-3)] mt-1">
+                    Joint leaders with {bestAttackTeams.length} teams on{" "}
+                    {bestAttackTeams[0].goalsScored} goals
+                  </p>
+                )}
               </Card>
             ) : null}
 
-            {stats.bestDefence ? (
+            {bestDefenceTeams.length > 0 ? (
               <Card className="relative overflow-hidden p-5">
                 <StatusSpine tone="pitch" />
                 <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--pitch)]">
                   Best defence
                 </p>
                 <p className="mt-2 text-lg font-black text-[var(--ink)]">
-                  {stats.bestDefence.team.name}
+                  {bestDefenceTeams.map((t) => t.team.name).join(" & ")}
                 </p>
                 <p className="text-sm text-[var(--ink-3)]">
-                  {stats.bestDefence.goalsConceded} conceded ·{" "}
-                  {stats.bestDefence.cleanSheets} clean sheets
+                  {bestDefenceTeams[0].goalsConceded} conceded ·{" "}
+                  {bestDefenceTeams[0].cleanSheets} clean sheets
                 </p>
+                {bestDefenceTeams.length > 1 && (
+                  <p className="text-xs text-[var(--ink-3)] mt-1">
+                    Joint leaders with {bestDefenceTeams.length} teams on{" "}
+                    {bestDefenceTeams[0].goalsConceded} conceded
+                  </p>
+                )}
               </Card>
             ) : null}
           </div>
