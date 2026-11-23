@@ -1,5 +1,6 @@
 import {
   CARD_EVENTS,
+  OWN_GOAL_EVENTS,
   SCORING_EVENTS,
   isSendingOff,
   type EventType,
@@ -8,6 +9,33 @@ import {
   type Player,
   type Team,
 } from "./db/schema";
+
+/**
+ * Rebuilds a scoreline from recorded events.
+ *
+ * An own goal is stored against the conceding side, so it adds to the other
+ * team's tally. Ordinary goals are stored against the scoring side. The result
+ * is clamped at zero so a malformed event set can never display negative goals.
+ */
+export function scorelineFromEvents(
+  homeTeamId: string,
+  awayTeamId: string,
+  events: readonly Pick<MatchEvent, "teamId" | "type">[],
+): { home: number; away: number } {
+  const count = (teamId: string, types: ReadonlySet<string>) =>
+    events.filter((e) => e.teamId === teamId && types.has(e.type)).length;
+
+  return {
+    home: Math.max(
+      0,
+      count(homeTeamId, SCORING_EVENTS) + count(awayTeamId, OWN_GOAL_EVENTS),
+    ),
+    away: Math.max(
+      0,
+      count(awayTeamId, SCORING_EVENTS) + count(homeTeamId, OWN_GOAL_EVENTS),
+    ),
+  };
+}
 
 export type PlayerIdentity = Pick<Player, "id" | "fullName" | "nickname" | "position">;
 
@@ -47,17 +75,21 @@ export type TeamStatRow = {
  * Only events attached to FINISHED matches count, so a mis-entered live
  * score can never leak into the leaderboards.
  *
- * `appearances` counts distinct matches a player appears in — derived from
- * squad membership, because we do not store a line-up per match.
+ * Appearances come from squad membership against the finished fixture list,
+ * not from whether a player happened to record an event. We do not store a
+ * line-up, so every squad member is treated as available for every completed
+ * match their team played, at 90 minutes each. An event can still confirm an
+ * appearance when membership data is stale, but it never creates one.
  */
 export function computePlayerStats(input: {
   players: PlayerIdentity[];
   events: MatchEvent[];
-  finishedMatchIds: ReadonlySet<string>;
+  finishedMatches: Match[];
   membership: Map<string, string | null>;
   teamNames: Map<string, string>;
 }): PlayerStatRow[] {
-  const { players, events, finishedMatchIds, membership, teamNames } = input;
+  const { players, events, finishedMatches, membership, teamNames } = input;
+  const finishedMatchIds = new Set(finishedMatches.map((m) => m.id));
 
   const rows = new Map<string, PlayerStatRow>();
   for (const player of players) {
@@ -79,8 +111,17 @@ export function computePlayerStats(input: {
     });
   }
 
-  const appearanceSets = new Map<string, Set<string>>();
-  const maxMinuteByMatchPlayer = new Map<string, number>();
+  // Seed one appearance per completed fixture involving the player's squad.
+  const appearancesByPlayer = new Map<string, Set<string>>();
+  for (const player of players) {
+    const teamId = membership.get(player.id);
+    if (!teamId) continue;
+    const set = new Set<string>();
+    for (const match of finishedMatches) {
+      if (match.homeTeamId === teamId || match.awayTeamId === teamId) set.add(match.id);
+    }
+    appearancesByPlayer.set(player.id, set);
+  }
 
   for (const event of events) {
     if (!finishedMatchIds.has(event.matchId)) continue;
@@ -89,36 +130,18 @@ export function computePlayerStats(input: {
     const row = rows.get(event.playerId);
     if (!row) continue;
 
-    const key = `${event.matchId}:${event.playerId}`;
-    const matches = appearanceSets.get(event.playerId) ?? new Set<string>();
-    matches.add(event.matchId);
-    appearanceSets.set(event.playerId, matches);
-
-    const minute = event.minute ?? 0;
-    maxMinuteByMatchPlayer.set(
-      key,
-      Math.max(maxMinuteByMatchPlayer.get(key) ?? 0, minute),
-    );
+    // An event is never the source of truth for appearances, but if the squad
+    // row is missing it is still evidence the player took part.
+    const set = appearancesByPlayer.get(event.playerId) ?? new Set<string>();
+    set.add(event.matchId);
+    appearancesByPlayer.set(event.playerId, set);
 
     applyEvent(row, event.type);
   }
 
-  // Players who never produced an event still count as having appeared in
-  // every match their team played. This keeps clean-sheet and appearance
-  // maths honest without needing a line-up table.
-  const appearancesByPlayer = new Map<string, number>();
-  for (const player of players) appearancesByPlayer.set(player.id, 0);
-
-  for (const [playerId, matches] of appearanceSets) {
-    appearancesByPlayer.set(playerId, (appearancesByPlayer.get(playerId) ?? 0) + matches.size);
-  }
-
   for (const row of rows.values()) {
-    row.appearances = appearancesByPlayer.get(row.player.id) ?? 0;
-    row.minutesPlayed = [...appearanceSets.get(row.player.id) ?? []].reduce(
-      (sum, matchId) => sum + (maxMinuteByMatchPlayer.get(`${matchId}:${row.player.id}`) ?? 90),
-      0,
-    );
+    row.appearances = appearancesByPlayer.get(row.player.id)?.size ?? 0;
+    row.minutesPlayed = row.appearances * 90;
   }
 
   return [...rows.values()];
@@ -161,6 +184,7 @@ export function computeTeamStats(
   teams: Team[],
   matches: Match[],
   events: MatchEvent[] = [],
+  stages?: readonly string[],
 ): TeamStatRow[] {
   const rows = new Map<string, TeamStatRow>();
   for (const team of teams) {
@@ -176,8 +200,15 @@ export function computeTeamStats(
     });
   }
 
+  const allowedStages = stages ? new Set(stages) : null;
   const finished = matches
-    .filter((m) => m.status === "finished" && m.homeScore !== null && m.awayScore !== null)
+    .filter(
+      (m) =>
+        m.status === "finished" &&
+        m.homeScore !== null &&
+        m.awayScore !== null &&
+        (!allowedStages || allowedStages.has(m.stage)),
+    )
     .sort((a, b) => (a.scheduledAt?.getTime() ?? 0) - (b.scheduledAt?.getTime() ?? 0));
 
   // Current winless run per team, tracked independently and reset by a win.

@@ -1,18 +1,21 @@
 "use server";
 
 import { revalidatePath, refresh as refreshCurrentRoute } from "next/cache";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/db/auth";
 import { findDuplicatePlayer, getTournamentById, getTournamentTeams } from "@/lib/db/queries";
-import { matches, players, teamPlayers, teams, tournaments } from "@/lib/db/schema";
-import { roundRobinPairings } from "@/lib/standings";
+import { matchEvents, matches, players, teamPlayers, teams, tournaments } from "@/lib/db/schema";
+import { isUuid } from "@/lib/format";
+import { computeStandings, roundRobinPairings } from "@/lib/standings";
+import { formatLabel } from "@/lib/stages";
 import {
   assignSchema,
   roleSchema,
   classifyDuplicate,
   firstError,
   matchSchema,
+  optionalImageUrl,
   playerEditSchema,
   scoreSchema,
   teamSchema,
@@ -54,6 +57,7 @@ type SavedTournament = {
   clubName: string | null;
   venue: string | null;
   startDate: string | null;
+  format: string;
   status: string;
 };
 
@@ -73,7 +77,7 @@ function savedMessage(t: SavedTournament | undefined): string {
   if (!t.venue) missing.push("venue");
   if (!t.description) missing.push("description");
 
-  const saved = `Saved. /${t.slug} · ${t.status}`;
+  const saved = `Saved. /${t.slug} · ${formatLabel(t.format)} · ${t.status}`;
   return missing.length === 0
     ? `${saved} — name, club, date, venue and description all stored.`
     : `${saved} — not stored: ${missing.join(", ")}.`;
@@ -93,6 +97,7 @@ export async function saveTournament(
     clubName: String(formData.get("clubName") ?? ""),
     venue: String(formData.get("venue") ?? ""),
     startDate: String(formData.get("startDate") ?? ""),
+    format: String(formData.get("format") ?? "league"),
     status: String(formData.get("status") ?? "draft"),
   });
   if (!parsed.success) {
@@ -104,6 +109,11 @@ export async function saveTournament(
   }
   const data = parsed.data;
   const id = String(formData.get("tournamentId") ?? "");
+  if (id && !isUuid(id)) return { ok: false, message: "Invalid tournament" };
+  if (id) {
+    const existing = await getTournamentById(id);
+    if (!existing) return { ok: false, message: "Tournament not found" };
+  }
 
   const clash = await db
     .select({ id: tournaments.id })
@@ -120,7 +130,10 @@ export async function saveTournament(
     clubName: data.clubName || null,
     venue: data.venue || null,
     startDate: data.startDate || null,
+    format: data.format,
     status: data.status,
+    // A trophy banner must not survive a cup being reopened.
+    ...(data.status === "done" ? {} : { winnerTeamId: null }),
   };
 
   if (id) {
@@ -138,6 +151,7 @@ export async function saveTournament(
         clubName: tournaments.clubName,
         venue: tournaments.venue,
         startDate: tournaments.startDate,
+        format: tournaments.format,
         status: tournaments.status,
       })
       .from(tournaments)
@@ -161,15 +175,17 @@ export async function setWinner(_prev: ActionState, formData: FormData): Promise
   await requireAdmin();
   const tournamentId = String(formData.get("tournamentId") ?? "");
   const teamId = String(formData.get("teamId") ?? "");
-  if (!tournamentId) return { ok: false, message: "Missing tournament" };
+  if (!isUuid(tournamentId)) return { ok: false, message: "Invalid tournament" };
+  if (teamId && !isUuid(teamId)) return { ok: false, message: "Invalid team" };
+  const tournament = await getTournamentById(tournamentId);
+  if (!tournament) return { ok: false, message: "Tournament not found" };
 
   if (!teamId) {
     await db
       .update(tournaments)
-      .set({ winnerTeamId: null })
+      .set({ winnerTeamId: null, status: tournament.status === "done" ? "live" : tournament.status })
       .where(eq(tournaments.id, tournamentId));
-    const slug = (await getTournamentById(tournamentId))?.slug;
-    refresh(slug ?? tournamentId);
+    refresh(tournamentId);
     return { ok: true, message: "Champion cleared" };
   }
 
@@ -183,8 +199,7 @@ export async function setWinner(_prev: ActionState, formData: FormData): Promise
     .set({ winnerTeamId: teamId, status: "done" })
     .where(eq(tournaments.id, tournamentId));
 
-  const slug = (await getTournamentById(tournamentId))?.slug;
-  refresh(slug ?? tournamentId);
+  refresh(tournamentId);
   return { ok: true, message: `${team[0].name} is the champion!` };
 }
 
@@ -205,7 +220,7 @@ export async function deleteTournament(
 ): Promise<ActionState> {
   await requireAdmin();
   const id = String(formData.get("tournamentId") ?? "");
-  if (!id) return { ok: false, message: "Missing tournament" };
+  if (!isUuid(id)) return { ok: false, message: "Invalid tournament" };
 
   // Guard against deleting something that is not there, so a double submit or a
   // stale page reports honestly instead of claiming success.
@@ -247,6 +262,7 @@ export async function saveTeam(_prev: ActionState, formData: FormData): Promise<
   }
   const data = parsed.data;
   const teamId = String(formData.get("teamId") ?? "");
+  if (teamId && !isUuid(teamId)) return { ok: false, message: "Invalid team" };
 
   const primary = data.primaryColor || data.color || "#16a34a";
   const values = {
@@ -259,6 +275,25 @@ export async function saveTeam(_prev: ActionState, formData: FormData): Promise<
     secondaryColor: data.secondaryColor || "#0f172a",
     logoUrl: data.logoUrl || null,
   };
+
+  if (!(await getTournamentById(data.tournamentId))) {
+    return { ok: false, message: "Tournament not found" };
+  }
+
+  // A squad belongs to one cup for its whole life. Moving it by editing a
+  // hidden field would strand its fixtures, memberships and events.
+  const existing = teamId
+    ? (
+        await db
+          .select({ tournamentId: teams.tournamentId })
+          .from(teams)
+          .where(eq(teams.id, teamId))
+          .limit(1)
+      )[0]
+    : undefined;
+  if (teamId && (!existing || existing.tournamentId !== data.tournamentId)) {
+    return { ok: false, message: "Team not found in this tournament" };
+  }
 
   // Two squads with the same name make the fixture dropdowns ambiguous, so
   // names are unique per tournament. Compared case-insensitively.
@@ -347,10 +382,18 @@ export async function setTeamRole(
 export async function deleteTeam(_prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireAdmin();
   const teamId = String(formData.get("teamId") ?? "");
-  if (!teamId) return { ok: false, message: "Missing team" };
+  if (!isUuid(teamId)) return { ok: false, message: "Invalid team" };
   const t = await db.select().from(teams).where(eq(teams.id, teamId)).limit(1);
-  await db.delete(teams).where(eq(teams.id, teamId));
-  refresh(t[0]?.tournamentId);
+  if (!t[0]) return { ok: false, message: "Team not found" };
+  await db.transaction(async (tx) => {
+    // A deleted champion must not leave a dangling trophy banner.
+    await tx
+      .update(tournaments)
+      .set({ winnerTeamId: null })
+      .where(eq(tournaments.winnerTeamId, teamId));
+    await tx.delete(teams).where(eq(teams.id, teamId));
+  });
+  refresh(t[0].tournamentId);
   return { ok: true, message: "Team removed" };
 }
 
@@ -358,10 +401,18 @@ export async function setTeamLogo(_prev: ActionState, formData: FormData): Promi
   await requireAdmin();
   const teamId = String(formData.get("teamId") ?? "");
   const logoUrl = String(formData.get("logoUrl") ?? "");
-  if (!teamId) return { ok: false, message: "Missing team" };
-  const t = await db.select().from(teams).where(eq(teams.id, teamId)).limit(1);
+  if (!isUuid(teamId)) return { ok: false, message: "Invalid team" };
+  if (!optionalImageUrl.safeParse(logoUrl).success) {
+    return { ok: false, message: "Use an image URL from this site's storage" };
+  }
+  const t = await db
+    .select({ tournamentId: teams.tournamentId })
+    .from(teams)
+    .where(eq(teams.id, teamId))
+    .limit(1);
+  if (!t[0]) return { ok: false, message: "Team not found" };
   await db.update(teams).set({ logoUrl: logoUrl || null }).where(eq(teams.id, teamId));
-  refresh(t[0]?.tournamentId);
+  refresh(t[0].tournamentId);
   return { ok: true, message: "Logo updated" };
 }
 
@@ -387,6 +438,16 @@ export async function editPlayer(_prev: ActionState, formData: FormData): Promis
   const data = parsed.data;
   const tournamentId = data.tournamentId || null;
 
+  const existing = await db
+    .select({ tournamentId: players.tournamentId })
+    .from(players)
+    .where(eq(players.id, data.playerId))
+    .limit(1);
+  if (!existing[0]) return { ok: false, message: "Player not found" };
+  if (tournamentId && !(await getTournamentById(tournamentId))) {
+    return { ok: false, message: "Tournament not found" };
+  }
+
   const duplicate = await findDuplicatePlayer({
     fullName: data.fullName,
     nickname: data.nickname || null,
@@ -410,17 +471,34 @@ export async function editPlayer(_prev: ActionState, formData: FormData): Promis
     }
   }
 
-  await db
-    .update(players)
-    .set({
-      fullName: data.fullName,
-      nickname: data.nickname || null,
-      phone: data.phone || null,
-      position: data.position,
-      tournamentId,
-    })
-    .where(eq(players.id, data.playerId));
+  await db.transaction(async (tx) => {
+    if (existing[0].tournamentId !== tournamentId) {
+      // Moving a person to another cup must not leave them in an old squad or
+      // holding an old captain/manager badge.
+      await tx
+        .update(teams)
+        .set({ captainPlayerId: null })
+        .where(eq(teams.captainPlayerId, data.playerId));
+      await tx
+        .update(teams)
+        .set({ managerPlayerId: null })
+        .where(eq(teams.managerPlayerId, data.playerId));
+      await tx.delete(teamPlayers).where(eq(teamPlayers.playerId, data.playerId));
+    }
 
+    await tx
+      .update(players)
+      .set({
+        fullName: data.fullName,
+        nickname: data.nickname || null,
+        phone: data.phone || null,
+        position: data.position,
+        tournamentId,
+      })
+      .where(eq(players.id, data.playerId));
+  });
+
+  refresh(existing[0].tournamentId);
   refresh(tournamentId);
   return { ok: true, message: "Player updated" };
 }
@@ -453,19 +531,29 @@ export async function assignPlayer(_prev: ActionState, formData: FormData): Prom
   }
 
   // A player sits in exactly one team at a time, so a transfer is
-  // remove-then-insert. team_players is keyed (team_id, player_id) rather than
-  // player_id alone, so this delete is what stops a player sitting in two
-  // squads at once.
-  await db.delete(teamPlayers).where(eq(teamPlayers.playerId, playerId));
-
-  if (target) {
-    await db.insert(teamPlayers).values({ teamId: target.id, playerId });
-    refresh(player[0].tournamentId);
-    return { ok: true, message: `${player[0].fullName} → ${target.name}` };
-  }
+  // remove-then-insert. Clear any captain/manager badge from the old side in
+  // the same transaction, otherwise the role points at a player who is no
+  // longer in that squad.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(teams)
+      .set({ captainPlayerId: null })
+      .where(eq(teams.captainPlayerId, playerId));
+    await tx
+      .update(teams)
+      .set({ managerPlayerId: null })
+      .where(eq(teams.managerPlayerId, playerId));
+    await tx.delete(teamPlayers).where(eq(teamPlayers.playerId, playerId));
+    if (target) await tx.insert(teamPlayers).values({ teamId: target.id, playerId });
+  });
 
   refresh(player[0].tournamentId);
-  return { ok: true, message: `${player[0].fullName} unassigned` };
+  return {
+    ok: true,
+    message: target
+      ? `${player[0].fullName} → ${target.name}`
+      : `${player[0].fullName} unassigned`,
+  };
 }
 
 export async function randomizeTeams(
@@ -474,21 +562,16 @@ export async function randomizeTeams(
 ): Promise<ActionState> {
   await requireAdmin();
   const tournamentId = String(formData.get("tournamentId") ?? "");
-  if (!tournamentId) return { ok: false, message: "Missing tournament" };
+  if (!isUuid(tournamentId)) return { ok: false, message: "Invalid tournament" };
+  if (!(await getTournamentById(tournamentId))) {
+    return { ok: false, message: "Tournament not found" };
+  }
 
   const teamList = await getTournamentTeams(tournamentId);
   if (teamList.length < 2) return { ok: false, message: "Create at least two teams first." };
 
   const ids = await allPlayerIdsFor(tournamentId);
   if (ids.length === 0) return { ok: false, message: "No players registered yet." };
-
-  // Clear existing assignments for every team in this tournament.
-  await db.delete(teamPlayers).where(
-    inArray(
-      teamPlayers.teamId,
-      teamList.map((t) => t.id),
-    ),
-  );
 
   // Fisher-Yates, so the shuffle is uniform rather than sort-random.
   const shuffled = [...ids];
@@ -502,7 +585,18 @@ export async function randomizeTeams(
     teamId: teamList[i % teamList.length].id,
     playerId,
   }));
-  await db.insert(teamPlayers).values(rows);
+
+  // Clear assignments and role badges in this tournament in one transaction.
+  // A shuffled squad must not keep a captain or manager from the old lineup.
+  const teamIds = teamList.map((t) => t.id);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(teams)
+      .set({ captainPlayerId: null, managerPlayerId: null })
+      .where(inArray(teams.id, teamIds));
+    await tx.delete(teamPlayers).where(inArray(teamPlayers.teamId, teamIds));
+    await tx.insert(teamPlayers).values(rows);
+  });
 
   refresh(tournamentId);
   return { ok: true, message: `Assigned ${rows.length} players across ${teamList.length} teams` };
@@ -517,6 +611,7 @@ export async function saveMatch(_prev: ActionState, formData: FormData): Promise
     homeTeamId: String(formData.get("homeTeamId") ?? ""),
     awayTeamId: String(formData.get("awayTeamId") ?? ""),
     round: String(formData.get("round") ?? "1"),
+    stage: String(formData.get("stage") ?? "group"),
     scheduledAt: String(formData.get("scheduledAt") ?? ""),
     venue: String(formData.get("venue") ?? ""),
     notes: String(formData.get("notes") ?? ""),
@@ -530,6 +625,24 @@ export async function saveMatch(_prev: ActionState, formData: FormData): Promise
   }
   const data = parsed.data;
   const matchId = String(formData.get("matchId") ?? "");
+  if (matchId && !isUuid(matchId)) return { ok: false, message: "Invalid fixture" };
+  if (!(await getTournamentById(data.tournamentId))) {
+    return { ok: false, message: "Tournament not found" };
+  }
+
+  const existing = matchId
+    ? (
+        await db
+          .select({ tournamentId: matches.tournamentId })
+          .from(matches)
+          .where(eq(matches.id, matchId))
+          .limit(1)
+      )[0]
+    : undefined;
+  if (matchId && !existing) return { ok: false, message: "Fixture not found" };
+  if (existing && existing.tournamentId !== data.tournamentId) {
+    return { ok: false, message: "A fixture cannot move between tournaments." };
+  }
 
   // Both sides must belong to this tournament. Without this a hand-crafted
   // request could file a fixture between squads from two different
@@ -548,19 +661,33 @@ export async function saveMatch(_prev: ActionState, formData: FormData): Promise
     homeTeamId: data.homeTeamId,
     awayTeamId: data.awayTeamId,
     round: data.round,
+    stage: data.stage,
     scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
     venue: data.venue || null,
     notes: data.notes || null,
   };
 
   if (matchId) {
-    await db.update(matches).set(values).where(eq(matches.id, matchId));
+    await db.transaction(async (tx) => {
+      await tx.update(matches).set(values).where(eq(matches.id, matchId));
+      // If either side was swapped, an event credited to the removed team no
+      // longer belongs to this fixture. Keep the event but drop the stale team
+      // so it cannot pollute that team's record.
+      await tx
+        .update(matchEvents)
+        .set({ teamId: null })
+        .where(
+          and(
+            eq(matchEvents.matchId, matchId),
+            notInArray(matchEvents.teamId, [data.homeTeamId, data.awayTeamId]),
+          ),
+        );
+    });
   } else {
     await db.insert(matches).values(values);
   }
 
-  const slug = (await getTournamentById(data.tournamentId))?.slug;
-  refresh(slug ?? data.tournamentId);
+  refresh(data.tournamentId);
   return { ok: true, message: matchId ? "Fixture updated" : "Fixture created" };
 }
 
@@ -570,7 +697,9 @@ export async function generateFixtures(
 ): Promise<ActionState> {
   await requireAdmin();
   const tournamentId = String(formData.get("tournamentId") ?? "");
-  if (!tournamentId) return { ok: false, message: "Missing tournament" };
+  if (!isUuid(tournamentId)) return { ok: false, message: "Invalid tournament" };
+  const tournament = await getTournamentById(tournamentId);
+  if (!tournament) return { ok: false, message: "Tournament not found" };
 
   const teamList = await getTournamentTeams(tournamentId);
   if (teamList.length < 2) return { ok: false, message: "Create at least two teams first." };
@@ -583,26 +712,115 @@ export async function generateFixtures(
     return { ok: false, message: "Fixtures already exist. Delete them first to regenerate." };
   }
 
-  const teamIds = teamList.map((t) => t.id);
-  const pairs = roundRobinPairings(teamIds);
-  const perRound = Math.floor(teamIds.length / 2);
+  const format = tournament.format ?? "league";
 
-  await db.insert(matches).values(
-    pairs.map(([home, away], i) => ({
-      tournamentId,
-      homeTeamId: home,
-      awayTeamId: away,
-      round: Math.floor(i / perRound) + 1,
-    })),
-  );
+  // A knockout bracket needs seeding choices a round-robin generator cannot
+  // guess. Two teams is unambiguous, so that one case is generated as a final.
+  if (format === "knockout" && teamList.length > 2) {
+    return {
+      ok: false,
+      message: "Add knockout ties manually — use “Add a fixture” and pick a stage.",
+    };
+  }
+
+  const teamIds = teamList.map((t) => t.id);
+  const values =
+    format === "knockout"
+      ? [
+          {
+            tournamentId,
+            stage: "final",
+            round: 1,
+            homeTeamId: teamIds[0]!,
+            awayTeamId: teamIds[1]!,
+            venue: tournament.venue,
+          },
+        ]
+      : roundRobinPairings(teamIds).map(([home, away], i) => ({
+          tournamentId,
+          stage: "group",
+          round: Math.floor(i / Math.floor(teamIds.length / 2)) + 1,
+          homeTeamId: home,
+          awayTeamId: away,
+          venue: tournament.venue,
+        }));
+
+  await db.insert(matches).values(values);
 
   await db.update(tournaments).set({ status: "live" }).where(eq(tournaments.id, tournamentId));
 
-  const slug = (await getTournamentById(tournamentId))?.slug;
-  refresh(slug ?? tournamentId);
+  refresh(tournamentId);
   return {
     ok: true,
-    message: `Created ${pairs.length} fixtures across ${teamList.length} teams — now live`,
+    message: `Created ${values.length} ${format === "knockout" ? "final" : "group fixtures"} across ${teamList.length} teams — now live`,
+  };
+}
+
+/**
+ * Tri-series helper: once the group games have been played, seed the final
+ * from the table (1st vs 2nd). Idempotent — a second call refuses to create a
+ * duplicate final, so the organiser can click it without checking first.
+ */
+export async function createFinal(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireAdmin();
+  const tournamentId = String(formData.get("tournamentId") ?? "");
+  if (!isUuid(tournamentId)) return { ok: false, message: "Invalid tournament" };
+  const tournament = await getTournamentById(tournamentId);
+  if (!tournament) return { ok: false, message: "Tournament not found" };
+  if (tournament.format !== "tri_series") {
+    return { ok: false, message: "The final helper is only for tri-series cups." };
+  }
+
+  const existing = await db
+    .select({ id: matches.id })
+    .from(matches)
+    .where(and(eq(matches.tournamentId, tournamentId), eq(matches.stage, "final")));
+  if (existing.length > 0) {
+    return { ok: false, message: "A final already exists — edit that fixture instead." };
+  }
+
+  const [teamList, matchList] = await Promise.all([
+    getTournamentTeams(tournamentId),
+    db.select().from(matches).where(eq(matches.tournamentId, tournamentId)),
+  ]);
+  const groupMatches = matchList.filter((m) => m.stage === "group");
+  if (groupMatches.length === 0) {
+    return { ok: false, message: "Create the group fixtures before adding a final." };
+  }
+  if (
+    groupMatches.some(
+      (m) => m.status !== "finished" || m.homeScore === null || m.awayScore === null,
+    )
+  ) {
+    return { ok: false, message: "Finish every group match before creating the final." };
+  }
+
+  const standings = computeStandings(teamList, matchList, ["group"]);
+  if (standings.length < 2 || standings[1]!.played === 0) {
+    return { ok: false, message: "Add at least two teams and complete the group phase first." };
+  }
+
+  const lastRound = matchList.reduce((max, m) => Math.max(max, m.round), 0);
+  try {
+    // The partial unique index on (tournament_id) where stage = 'final' is the
+    // real guard against two simultaneous clicks creating two finals.
+    await db.insert(matches).values({
+      tournamentId,
+      stage: "final",
+      round: lastRound + 1,
+      homeTeamId: standings[0]!.team.id,
+      awayTeamId: standings[1]!.team.id,
+      venue: tournament.venue,
+      notes: "Top two qualify",
+    });
+  } catch {
+    return { ok: false, message: "A final already exists — edit that fixture instead." };
+  }
+
+  refresh(tournamentId);
+  return {
+    ok: true,
+    message: `Final set: ${standings[0]!.team.name} vs ${standings[1]!.team.name}`,
   };
 }
 
@@ -630,18 +848,22 @@ export async function updateScore(_prev: ActionState, formData: FormData): Promi
     .set({ homeScore: data.homeScore, awayScore: data.awayScore, status: data.status })
     .where(eq(matches.id, data.matchId));
 
-  const slug = (await getTournamentById(existing[0].tournamentId))?.slug;
-  refresh(slug ?? existing[0].tournamentId);
+  refresh(existing[0].tournamentId);
   return { ok: true, message: "Score saved" };
 }
 
 export async function deleteMatch(_prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireAdmin();
   const matchId = String(formData.get("matchId") ?? "");
-  if (!matchId) return { ok: false, message: "Missing match" };
-  const m = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1);
+  if (!isUuid(matchId)) return { ok: false, message: "Invalid match" };
+  const m = await db
+    .select({ tournamentId: matches.tournamentId })
+    .from(matches)
+    .where(eq(matches.id, matchId))
+    .limit(1);
+  if (!m[0]) return { ok: false, message: "Match not found" };
   await db.delete(matches).where(eq(matches.id, matchId));
-  refresh(m[0]?.tournamentId);
+  refresh(m[0].tournamentId);
   return { ok: true, message: "Match deleted" };
 }
 
@@ -652,10 +874,18 @@ export async function setMatchPhoto(
   await requireAdmin();
   const matchId = String(formData.get("matchId") ?? "");
   const photoUrl = String(formData.get("photoUrl") ?? "");
-  if (!matchId) return { ok: false, message: "Missing match" };
-  const m = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1);
+  if (!isUuid(matchId)) return { ok: false, message: "Invalid match" };
+  if (!optionalImageUrl.safeParse(photoUrl).success) {
+    return { ok: false, message: "Use an image URL from this site's storage" };
+  }
+  const m = await db
+    .select({ tournamentId: matches.tournamentId })
+    .from(matches)
+    .where(eq(matches.id, matchId))
+    .limit(1);
+  if (!m[0]) return { ok: false, message: "Match not found" };
   await db.update(matches).set({ photoUrl: photoUrl || null }).where(eq(matches.id, matchId));
-  refresh(m[0]?.tournamentId);
+  refresh(m[0].tournamentId);
   return { ok: true, message: "Photo updated" };
 }
 
@@ -687,6 +917,12 @@ export async function deleteMatchForm(formData: FormData): Promise<void> {
 }
 export async function generateFixturesForm(formData: FormData): Promise<void> {
   await generateFixtures({ ok: false }, formData);
+}
+export async function createFinalForm(formData: FormData): Promise<void> {
+  await createFinal({ ok: false }, formData);
+}
+export async function saveMatchForm(formData: FormData): Promise<void> {
+  await saveMatch({ ok: false }, formData);
 }
 export async function setWinnerForm(formData: FormData): Promise<void> {
   await setWinner({ ok: false }, formData);

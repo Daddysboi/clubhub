@@ -8,6 +8,19 @@ import postgres from "postgres";
  * Usage: npx tsx scripts/apply-schema.ts
  */
 
+// Scripts run outside Next, where .env.local is not loaded for us.
+try {
+  const env = readFileSync(".env.local", "utf8");
+  for (const line of env.split(/\r?\n/)) {
+    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (match && !process.env[match[1]!]) {
+      process.env[match[1]!] = match[2]!.replace(/^["']|["']$/g, "");
+    }
+  }
+} catch {
+  // Fall back to the ambient environment (e.g. CI or Vercel).
+}
+
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) {

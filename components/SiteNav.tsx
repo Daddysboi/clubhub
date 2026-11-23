@@ -42,8 +42,11 @@ export function SiteNav() {
     <>
       {/* Desktop / tablet: full horizontal nav. */}
       <header className="sticky top-0 z-40 hidden border-b border-[var(--rule)] bg-[var(--surface-a85)] backdrop-blur sm:block">
-        <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-2 px-4">
-          <Link href="/" aria-label="CupShub home">
+        <nav
+          aria-label="Main"
+          className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-2 px-4"
+        >
+          <Link href="/" aria-label="ClubHub home">
             <Logo />
           </Link>
           <div className="flex items-center gap-1 text-sm">
@@ -60,7 +63,7 @@ export function SiteNav() {
           which frees the whole width for the wordmark and a CTA. */}
       <header className="sticky top-0 z-40 border-b border-[var(--rule)] bg-[var(--surface-a85)] pt-safe backdrop-blur sm:hidden">
         <div className="flex h-14 items-center justify-between gap-2 px-4">
-          <Link href="/" aria-label="CupShub home">
+          <Link href="/" aria-label="ClubHub home">
             <Logo />
           </Link>
           <Link

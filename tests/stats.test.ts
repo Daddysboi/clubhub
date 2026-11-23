@@ -7,6 +7,7 @@ import {
   computePlayerStats,
   computeTeamStats,
   groupTopScorers,
+  scorelineFromEvents,
   topScorers,
   type PlayerStatRow,
   type TeamStatRow,
@@ -43,6 +44,7 @@ function match(
     id: uid("match-"),
     tournamentId: "cup",
     round: 1,
+    stage: "group",
     homeTeamId: home.id,
     awayTeamId: away.id,
     scheduledAt: new Date(seq * 1000),
@@ -53,6 +55,18 @@ function match(
     photoUrl: null,
     notes: null,
     createdAt: new Date(0),
+  };
+}
+
+/** Finished fixture used to seed squad-based appearances in stats tests. */
+function completed(id: string, homeTeamId = "team-a", awayTeamId = "team-b"): Match {
+  return {
+    ...match(team("Home"), team("Away"), 0, 0),
+    id,
+    homeTeamId,
+    awayTeamId,
+    stage: "group",
+    status: "finished",
   };
 }
 
@@ -349,7 +363,7 @@ describe("computePlayerStats", () => {
     return computePlayerStats({
       players: roster,
       events,
-      finishedMatchIds: new Set(finished),
+      finishedMatches: finished.map((id) => completed(id)),
       membership,
       teamNames,
     });
@@ -412,13 +426,20 @@ describe("computePlayerStats", () => {
     expect(playerFor(rows, "Ada Nwosu").goals).toBe(0);
   });
 
-  it("counts an appearance once per finished match with an event", () => {
-    const rows = run([
-      event("m1", "team-a", "p1", "goal", 5),
-      event("m1", "team-a", "p1", "yellow_card", 60),
-    ]);
+  it("counts squad appearances even without an event, at 90 minutes each", () => {
+    const rows = run([]);
+    const ada = playerFor(rows, "Ada Nwosu");
 
-    expect(playerFor(rows, "Ada Nwosu").appearances).toBe(1);
+    expect(ada.appearances).toBe(1);
+    expect(ada.minutesPlayed).toBe(90);
+    // Ben is in the other side of the same fixture, so he also appeared.
+    expect(playerFor(rows, "Ben Osei").appearances).toBe(1);
+  });
+
+  it("does not turn a late goal into a short appearance", () => {
+    const rows = run([event("m1", "team-a", "p1", "goal", 5)]);
+
+    expect(playerFor(rows, "Ada Nwosu")).toMatchObject({ appearances: 1, minutesPlayed: 90 });
   });
 
   it("includes every registered player even with no events", () => {
@@ -432,7 +453,7 @@ describe("computePlayerStats", () => {
     const rows = computePlayerStats({
       players: roster,
       events: [],
-      finishedMatchIds: new Set<string>(),
+      finishedMatches: [],
       membership: new Map([["p1", null]]),
       teamNames,
     });
@@ -462,7 +483,7 @@ describe("topScorers", () => {
       computePlayerStats({
         players: roster,
         events,
-        finishedMatchIds: new Set(["m1"]),
+        finishedMatches: [completed("m1")],
         membership,
         teamNames,
       }),
@@ -537,7 +558,7 @@ describe("topScorers", () => {
     const rows = computePlayerStats({
       players: many,
       events,
-      finishedMatchIds: new Set(["m1"]),
+      finishedMatches: [completed("m1")],
       membership: new Map(many.map((p) => [p.id, "team-a"])),
       teamNames: new Map([["team-a", "Team A"]]),
     });
@@ -568,7 +589,7 @@ describe("groupTopScorers", () => {
         computePlayerStats({
           players: roster,
           events,
-          finishedMatchIds: new Set(["m1"]),
+          finishedMatches: [completed("m1")],
           membership,
           teamNames,
         }),
@@ -619,5 +640,50 @@ describe("groupTopScorers", () => {
       ["Ada Nwosu", "Ben Osei"],
       ["Cara Lim"],
     ]);
+  });
+});
+
+describe("scorelineFromEvents", () => {
+  it("credits an own goal to the opponent, not the conceding side", () => {
+    const result = scorelineFromEvents("home", "away", [
+      event("m1", "home", "p1", "own_goal", 30),
+    ]);
+
+    expect(result).toEqual({ home: 0, away: 1 });
+  });
+
+  it("counts ordinary and penalty goals for the scoring side", () => {
+    const result = scorelineFromEvents("home", "away", [
+      event("m1", "home", "p1", "goal", 10),
+      event("m1", "home", "p2", "penalty_goal", 45),
+      event("m1", "away", "p3", "goal", 70),
+    ]);
+
+    expect(result).toEqual({ home: 2, away: 1 });
+  });
+
+  it("never reports a negative score", () => {
+    const result = scorelineFromEvents("home", "away", [
+      event("m1", "home", "p1", "own_goal", 10),
+      event("m1", "home", "p2", "own_goal", 20),
+    ]);
+
+    expect(result.home).toBe(0);
+    expect(result.away).toBe(2);
+  });
+});
+
+describe("computeTeamStats stage filter", () => {
+  it("keeps knockout goals out of league records", () => {
+    const a = team("A");
+    const b = team("B");
+    const groupGame = match(a, b, 2, 0);
+    const final = { ...match(a, b, 0, 3), stage: "final" as const };
+
+    const [aStats, bStats] = computeTeamStats([a, b], [groupGame, final], [], ["group"]);
+
+    expect(aStats.goalsScored).toBe(2);
+    expect(bStats.goalsScored).toBe(0);
+    expect(aStats.cleanSheets).toBe(1);
   });
 });

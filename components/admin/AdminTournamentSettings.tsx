@@ -55,6 +55,18 @@ export function AdminTournamentSettings({
             </Field>
 
             <Field
+              label="Format"
+              htmlFor="tFormat"
+              hint="League has no final. Tri-series adds 1st vs 2nd after the group games."
+            >
+              <Select id="tFormat" name="format" defaultValue={tournament.format ?? "league"}>
+                <option value="league">League — round-robin, no final</option>
+                <option value="tri_series">Tri-series — group phase then final</option>
+                <option value="knockout">Knockout — ties only</option>
+              </Select>
+            </Field>
+
+            <Field
               label="Club name"
               htmlFor="tClub"
               hint="Shown in the public header, e.g. A Mastic FC competition"

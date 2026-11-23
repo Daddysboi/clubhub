@@ -20,7 +20,11 @@ export type Standings = StandingRow[];
  * Standings are always computed from finished matches — never stored.
  * Points: 3 win / 1 draw. Tie-breakers: points, goal diff, goals for, then name.
  */
-export function computeStandings(teams: Team[], matches: Match[]): Standings {
+export function computeStandings(
+  teams: Team[],
+  matches: Match[],
+  stages?: readonly string[],
+): Standings {
   const played = new Map<string, StandingRow>();
 
   for (const team of teams) {
@@ -39,8 +43,13 @@ export function computeStandings(teams: Team[], matches: Match[]): Standings {
     });
   }
 
+  const allowedStages = stages ? new Set(stages) : null;
   const finished = matches.filter(
-    (m) => m.status === "finished" && m.homeScore !== null && m.awayScore !== null,
+    (m) =>
+      m.status === "finished" &&
+      m.homeScore !== null &&
+      m.awayScore !== null &&
+      (!allowedStages || allowedStages.has(m.stage)),
   );
 
   for (const match of finished) {

@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Textarea } from "@/components/ui/input";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { saveTournament } from "@/app/actions/admin";
 import { slugify } from "@/lib/format";
@@ -55,6 +55,18 @@ export function NewTournamentForm() {
 
         <Field label="Start date" htmlFor="startDate">
           <Input id="startDate" name="startDate" type="date" />
+        </Field>
+
+        <Field
+          label="Format"
+          htmlFor="format"
+          hint="League has no final. Tri-series adds 1st vs 2nd after the group games."
+        >
+          <Select id="format" name="format" defaultValue="league">
+            <option value="league">League — round-robin, no final</option>
+            <option value="tri_series">Tri-series — group phase then final</option>
+            <option value="knockout">Knockout — ties only</option>
+          </Select>
         </Field>
 
         <Field

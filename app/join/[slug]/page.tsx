@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getTournamentBySlug } from "@/lib/db/queries";
 import { SignupForm } from "@/components/SignupForm";
@@ -9,6 +10,21 @@ import { getPlayersForTournament } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
 
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const tournament = await getTournamentBySlug(slug);
+  if (!tournament || tournament.status !== "live") return { title: "Registration unavailable" };
+  return {
+    title: `Join ${tournament.name}`,
+    description: `Register to play in ${tournament.name}.`,
+    robots: { index: false },
+  };
+}
+
 export default async function JoinTournamentPage({
   params,
 }: {
@@ -16,7 +32,8 @@ export default async function JoinTournamentPage({
 }) {
   const { slug } = await params;
   const tournament = await getTournamentBySlug(slug);
-  if (!tournament) notFound();
+  // Draft cups have no public page; completed cups no longer accept entries.
+  if (!tournament || tournament.status !== "live") notFound();
 
   const roster = await getPlayersForTournament(tournament.id);
 

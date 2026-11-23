@@ -101,11 +101,7 @@ export function PlayerRow({
         >
           {teamName}
         </span>
-      ) : (
-        <span className="hidden shrink-0 rounded-md border border-dashed border-[var(--rule-strong)] px-2.5 py-0.5 text-xs text-[var(--ink-3)] sm:block">
-          Unassigned
-        </span>
-      )}
+      ) : null}
       {action}
     </div>
   );

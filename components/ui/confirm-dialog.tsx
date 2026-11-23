@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
@@ -17,6 +17,7 @@ import { cn } from "@/lib/cn";
 export function ConfirmDialog({
   action,
   triggerLabel = "Delete",
+  triggerAriaLabel,
   title,
   body,
   confirmLabel = "Delete",
@@ -30,6 +31,8 @@ export function ConfirmDialog({
   /** Server action to run on confirm. */
   action: (formData: FormData) => void | Promise<void>;
   triggerLabel?: string;
+  /** Disambiguates identical triggers in a long list. */
+  triggerAriaLabel?: string;
   /** Short question, e.g. "Delete this team?". */
   title: string;
   /** What is lost. Names the thing so the risk is concrete. */
@@ -45,6 +48,9 @@ export function ConfirmDialog({
 }) {
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // One dialog per fixture means a hard-coded id made every aria-labelledby
+  // point at the first fixture's heading.
+  const titleId = useId();
 
   useEffect(() => {
     const el = dialogRef.current;
@@ -69,6 +75,7 @@ export function ConfirmDialog({
         size={size}
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
+        aria-label={triggerAriaLabel}
         className={triggerClassName}
       >
         {triggerLabel}
@@ -76,7 +83,7 @@ export function ConfirmDialog({
 
       <dialog
         ref={dialogRef}
-        aria-labelledby="confirm-dialog-title"
+        aria-labelledby={titleId}
         onClose={() => setOpen(false)}
         className={cn(
           "m-auto w-[calc(100vw-2rem)] max-w-sm rounded-xl border border-[var(--rule)]",
@@ -88,7 +95,7 @@ export function ConfirmDialog({
         )}
       >
         <div className="p-5">
-          <h2 id="confirm-dialog-title" className="text-base font-bold leading-tight">
+          <h2 id={titleId} className="text-base font-bold leading-tight">
             {title}
           </h2>
           <div className="mt-2 text-sm leading-relaxed text-[var(--ink-2)]">{body}</div>

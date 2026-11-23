@@ -9,6 +9,8 @@ import {
   getStandings,
   getTournamentEvents,
   getTournamentStats,
+  getTournamentMemories,
+  getAdminMemoryComments,
 } from "@/lib/db/queries";
 import { AdminPlayers } from "@/components/admin/AdminPlayers";
 import { AdminTeams } from "@/components/admin/AdminTeams";
@@ -16,6 +18,7 @@ import { AdminFixtures } from "@/components/admin/AdminFixtures";
 import { AdminTournamentSettings } from "@/components/admin/AdminTournamentSettings";
 import { AdminMatchEvents } from "@/components/admin/AdminMatchEvents";
 import { AdminLiveStats } from "@/components/admin/AdminLiveStats";
+import { AdminMemories } from "@/components/admin/AdminMemories";
 import { AdminTabs } from "@/components/admin/AdminTabs";
 import { SignOutButton } from "@/components/SignOutButton";
 import { statusLabel, statusTone } from "@/lib/tones";
@@ -36,13 +39,15 @@ export default async function AdminTournamentPage({
   const tournament = await getTournamentById(id);
   if (!tournament) notFound();
 
-  const [teams, matches, players, standings, eventRows, stats] = await Promise.all([
+  const [teams, matches, players, standings, eventRows, stats, memories, comments] = await Promise.all([
     getTournamentTeams(tournament.id),
     getTournamentMatches(tournament.id),
     getPlayersForTournament(tournament.id),
     getStandings(tournament.id),
     getTournamentEvents(tournament.id),
     getTournamentStats(tournament.id),
+    getTournamentMemories(tournament.id),
+    getAdminMemoryComments(tournament.id),
   ]);
 
   // Group events by match so each fixture card can render its own timeline.
@@ -169,6 +174,20 @@ export default async function AdminTournamentPage({
                   })}
                 </section>
               ),
+          },
+          {
+            id: "memories",
+            label: "Memories",
+            badge: memories.length,
+            content: (
+              <AdminMemories
+                tournamentId={tournament.id}
+                matches={matches}
+                teams={teams}
+                memories={memories}
+                comments={comments}
+              />
+            ),
           },
           {
             id: "settings",

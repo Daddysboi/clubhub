@@ -1,19 +1,20 @@
 "use server";
 
 import { revalidatePath, refresh as refreshCurrentRoute } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/db/auth";
 import { getMatchEvents } from "@/lib/db/queries";
 import {
   CARD_EVENTS,
-  OWN_GOAL_EVENTS,
-  SCORING_EVENTS_FOR_TEAM,
   matchEvents,
   matches,
   players,
+  teamPlayers,
   teams,
 } from "@/lib/db/schema";
+import { isUuid } from "@/lib/format";
+import { scorelineFromEvents } from "@/lib/stats";
 import { eventSchema, firstError } from "@/lib/validation";
 import type { ActionState } from "./players";
 
@@ -38,12 +39,13 @@ async function tournamentIdForMatch(matchId: string) {
 /**
  * Records a goal / card / substitution.
  *
- * Two guards:
- *  1. the player must actually belong to the team supplied, and
- *  2. a card cannot be recorded twice for the same player in the same match.
+ * Three guards:
+ *  1. the team must be one of the two sides in this fixture,
+ *  2. the player must actually be in that team's squad, and
+ *  3. a card cannot be recorded twice for the same player in the same match.
  *
- * Own goals are credited to the team that BENEFITED, so team goal totals
- * stay consistent with the scoreline.
+ * An own goal is credited against the scorer's own side (the conceding team);
+ * reconciliation credits it to the opponent when rebuilding the scoreline.
  */
 export async function addMatchEvent(
   _prev: ActionState,
@@ -81,6 +83,18 @@ export async function addMatchEvent(
   }
   if (player[0].tournamentId !== match.tournamentId) {
     return { ok: false, message: "That player is not registered in this competition." };
+  }
+  if (data.teamId !== match.homeTeamId && data.teamId !== match.awayTeamId) {
+    return { ok: false, message: "That team is not playing in this fixture." };
+  }
+
+  const membership = await db
+    .select({ teamId: teamPlayers.teamId })
+    .from(teamPlayers)
+    .where(and(eq(teamPlayers.teamId, data.teamId), eq(teamPlayers.playerId, data.playerId)))
+    .limit(1);
+  if (!membership[0]) {
+    return { ok: false, message: "That player is not in this team's squad." };
   }
 
   const existing = await getMatchEvents(data.matchId);
@@ -120,7 +134,7 @@ export async function deleteMatchEvent(
 ): Promise<ActionState> {
   await requireAdmin();
   const eventId = String(formData.get("eventId") ?? "");
-  if (!eventId) return { ok: false, message: "Missing event" };
+  if (!isUuid(eventId)) return { ok: false, message: "Invalid event" };
 
   const rows = await db.select().from(matchEvents).where(eq(matchEvents.id, eventId)).limit(1);
   if (!rows[0]) return { ok: false, message: "Event not found" };
@@ -137,41 +151,34 @@ export async function deleteMatchEvent(
 export async function reconcileScore(_prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireAdmin();
   const matchId = String(formData.get("matchId") ?? "");
+  if (!isUuid(matchId)) return { ok: false, message: "Invalid match" };
   const match = await tournamentIdForMatch(matchId);
   if (!match) return { ok: false, message: "Match not found" };
 
   const events = await getMatchEvents(matchId);
 
-  const count = (teamId: string, types: ReadonlySet<string>) =>
-    events.filter((e) => e.teamId === teamId && types.has(e.type)).length;
-
-  // An own goal is recorded against the player who scored it, i.e. against the
-  // team that conceded it, so it must be counted and then subtracted.
-  const homeGoals =
-    count(match.homeTeamId, SCORING_EVENTS_FOR_TEAM) - count(match.homeTeamId, OWN_GOAL_EVENTS);
-  const awayGoals =
-    count(match.awayTeamId, SCORING_EVENTS_FOR_TEAM) - count(match.awayTeamId, OWN_GOAL_EVENTS);
+  const { home: correctedHome, away: correctedAway } = scorelineFromEvents(
+    match.homeTeamId,
+    match.awayTeamId,
+    events,
+  );
 
   const homeScore = match.homeScore ?? 0;
   const awayScore = match.awayScore ?? 0;
 
-  if (homeGoals === homeScore && awayGoals === awayScore) {
+  if (correctedHome === homeScore && correctedAway === awayScore) {
     return { ok: true, message: "Scoreline matches the recorded goals." };
   }
 
   await db
     .update(matches)
-    .set({
-      homeScore: Math.max(0, homeGoals),
-      awayScore: Math.max(0, awayGoals),
-      status: "finished",
-    })
+    .set({ homeScore: correctedHome, awayScore: correctedAway, status: "finished" })
     .where(eq(matches.id, matchId));
 
   refresh(match.tournamentId);
   return {
     ok: true,
-    message: `Scoreline corrected to ${homeGoals}–${awayGoals} from recorded goals.`,
+    message: `Scoreline corrected to ${correctedHome}–${correctedAway} from recorded goals.`,
   };
 }
 

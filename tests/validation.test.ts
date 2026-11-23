@@ -4,6 +4,7 @@ import {
   teamSchema,
   tournamentSchema,
   matchSchema,
+  optionalImageUrl,
   scoreSchema,
 } from "@/lib/validation";
 
@@ -98,6 +99,17 @@ describe("tournamentSchema", () => {
     );
   });
 
+  it("defaults the format to league and accepts every supported competition shape", () => {
+    const base = { slug: "cup", name: "Cup", status: "draft" };
+    const parsed = tournamentSchema.safeParse(base);
+    expect(parsed.success && parsed.data.format).toBe("league");
+
+    for (const format of ["league", "tri_series", "knockout"] as const) {
+      expect(tournamentSchema.safeParse({ ...base, format }).success).toBe(true);
+    }
+    expect(tournamentSchema.safeParse({ ...base, format: "round_robin" }).success).toBe(false);
+  });
+
   it("treats club name as optional and trims it", () => {
     expect(tournamentSchema.safeParse({ slug: "cup", name: "Cup", status: "live" }).success).toBe(true);
 
@@ -176,13 +188,56 @@ describe("matchSchema", () => {
     expect(firstFieldError(result)).toBe("awayTeamId");
   });
 
-  it("defaults the round to one", () => {
+  it("defaults the round to one and the stage to group", () => {
     const result = matchSchema.safeParse({
       tournamentId,
       homeTeamId: teamId,
       awayTeamId: matchId,
     });
     expect(result.success && result.data.round).toBe(1);
+    expect(result.success && result.data.stage).toBe("group");
+  });
+
+  it("accepts every stored stage, including quarter-finals", () => {
+    for (const stage of ["group", "quarter", "semi", "final"] as const) {
+      const result = matchSchema.safeParse({
+        tournamentId,
+        homeTeamId: teamId,
+        awayTeamId: matchId,
+        stage,
+      });
+      expect(result.success && result.data.stage).toBe(stage);
+    }
+  });
+
+  it("rejects an unknown stage", () => {
+    const result = matchSchema.safeParse({
+      tournamentId,
+      homeTeamId: teamId,
+      awayTeamId: matchId,
+      stage: "round 1",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("stores kickoff as an instant with an explicit offset", () => {
+    const base = { tournamentId, homeTeamId: teamId, awayTeamId: matchId };
+    expect(
+      matchSchema.safeParse({ ...base, scheduledAt: "2026-11-22T10:30:00.000Z" }).success,
+    ).toBe(true);
+    expect(
+      matchSchema.safeParse({ ...base, scheduledAt: "2026-11-22T10:30:00+01:00" }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a zone-less datetime-local value", () => {
+    const result = matchSchema.safeParse({
+      tournamentId,
+      homeTeamId: teamId,
+      awayTeamId: matchId,
+      scheduledAt: "2026-11-22T10:30",
+    });
+    expect(result.success).toBe(false);
   });
 });
 
@@ -261,6 +316,35 @@ describe("eventSchema", () => {
       "sub_off",
     ] as const) {
       expect(eventSchema.safeParse({ ...base, type }).success).toBe(true);
+    }
+  });
+});
+
+describe("optionalImageUrl", () => {
+  it("allows an empty value so optional fields can be cleared", () => {
+    expect(optionalImageUrl.safeParse("").success).toBe(true);
+  });
+
+  it("rejects unsafe and non-http schemes", () => {
+    expect(optionalImageUrl.safeParse("javascript:alert(1)").success).toBe(false);
+    expect(optionalImageUrl.safeParse("data:image/png;base64,AAAA").success).toBe(false);
+    expect(optionalImageUrl.safeParse("/relative/photo.jpg").success).toBe(false);
+    expect(optionalImageUrl.safeParse("http://evil.test/photo.jpg").success).toBe(false);
+  });
+
+  it("restricts hosts to the configured Supabase project in production", () => {
+    const previous = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
+    try {
+      expect(
+        optionalImageUrl.safeParse(
+          "https://project.supabase.co/storage/v1/object/public/memories/a/b.jpg",
+        ).success,
+      ).toBe(true);
+      expect(optionalImageUrl.safeParse("https://evil.test/photo.jpg").success).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      else process.env.NEXT_PUBLIC_SUPABASE_URL = previous;
     }
   });
 });

@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { eq } from "drizzle-orm";
 import { db } from "./index";
 import { admins } from "./schema";
+import { sessionCookieMaxAges } from "../security";
 
 /**
  * Returns the signed-in organiser, or null.
@@ -17,21 +18,27 @@ import { admins } from "./schema";
  * Both are required.
  */
 
-const COOKIE = { httpOnly: true, secure: false, sameSite: "lax" as const, path: "/" };
+const COOKIE = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+};
 
 function authUrl(path: string) {
   return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1${path}`;
 }
 
-function authHeaders() {
+/** `apikey` identifies the project; `Authorization` carries the user's token. */
+function authHeaders(accessToken?: string) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return { apikey: key, Authorization: `Bearer ${key}` };
+  return { apikey: key, Authorization: `Bearer ${accessToken ?? key}` };
 }
 
 type Session = { userId: string } | null;
 
-/** Trades a refresh token for a new access token. */
-async function refreshSession(refreshToken: string): Promise<boolean> {
+/** Trades a refresh token for a new access token, returning it for immediate use. */
+async function refreshSession(refreshToken: string): Promise<string | null> {
   const res = await fetch(authUrl("/token?grant_type=refresh_token"), {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -39,26 +46,26 @@ async function refreshSession(refreshToken: string): Promise<boolean> {
     cache: "no-store",
   }).catch(() => null);
 
-  if (!res?.ok) return false;
+  if (!res?.ok) return null;
 
   const data = await res.json().catch(() => null);
-  if (!data?.access_token) return false;
+  if (!data?.access_token || typeof data.access_token !== "string") return null;
 
-  const options = {
-    ...COOKIE,
-    secure: process.env.NODE_ENV === "production",
-    maxAge: data.expires_in ?? 3600,
-  };
+  const ages = sessionCookieMaxAges(data.expires_in);
 
   try {
     const store = await cookies();
-    store.set("sb-access-token", data.access_token, options);
-    if (data.refresh_token) store.set("sb-refresh-token", data.refresh_token, options);
+    store.set("sb-access-token", data.access_token, { ...COOKIE, maxAge: ages.access });
+    if (data.refresh_token) {
+      store.set("sb-refresh-token", data.refresh_token, { ...COOKIE, maxAge: ages.refresh });
+    }
   } catch {
     // Cookies are read-only during render; proxy.ts persists refreshed tokens.
   }
 
-  return true;
+  // Do not read the token back from the cookie store: during render the write
+  // above is intentionally swallowed, so the old expired value would remain.
+  return data.access_token;
 }
 
 async function currentSessionUser(): Promise<Session> {
@@ -71,7 +78,7 @@ async function currentSessionUser(): Promise<Session> {
   if (!token) return null;
 
   let res = await fetch(authUrl("/user"), {
-    headers: { ...authHeaders(), Authorization: `Bearer ${token}` },
+    headers: authHeaders(token),
     cache: "no-store",
   }).catch(() => null);
 
@@ -80,12 +87,12 @@ async function currentSessionUser(): Promise<Session> {
     const refreshToken = store.get("sb-refresh-token")?.value;
     if (!refreshToken) return null;
 
-    const refreshed = await refreshSession(refreshToken);
-    if (!refreshed) return null;
+    const refreshedToken = await refreshSession(refreshToken);
+    if (!refreshedToken) return null;
 
-    token = (await cookies()).get("sb-access-token")?.value ?? token;
+    token = refreshedToken;
     res = await fetch(authUrl("/user"), {
-      headers: { ...authHeaders(), Authorization: `Bearer ${token}` },
+      headers: authHeaders(token),
       cache: "no-store",
     }).catch(() => null);
   }

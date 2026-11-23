@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { sessionCookieMaxAges } from "@/lib/security";
 
 /**
  * Keeps the organiser session alive across requests.
@@ -43,34 +44,33 @@ export async function proxy(request: NextRequest) {
     cache: "no-store",
   }).catch(() => null);
 
+  const data = refreshed?.ok ? await refreshed.json().catch(() => null) : null;
+
   // The refresh token is dead too — clear the session so the user gets the
   // sign-in form instead of a broken half-signed-in state.
-  if (!refreshed?.ok) {
+  if (!data?.access_token || typeof data.access_token !== "string") {
     const response = NextResponse.next();
-    response.cookies.delete("sb-access-token");
-    response.cookies.delete("sb-refresh-token");
-    response.cookies.delete("sb-user-id");
+    for (const name of ["sb-access-token", "sb-refresh-token", "sb-user-id"]) {
+      response.cookies.set(name, "", { path: "/", maxAge: 0 });
+    }
     return response;
   }
 
-  const data = await refreshed.json().catch(() => null);
-  if (!data?.access_token) return NextResponse.next();
-
-  const maxAge = data.expires_in ?? 3600;
+  const { access, refresh } = sessionCookieMaxAges(data.expires_in);
   const response = NextResponse.next();
   response.cookies.set("sb-access-token", data.access_token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge,
+    maxAge: access,
   });
   response.cookies.set("sb-refresh-token", data.refresh_token ?? refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: data.expires_in ?? 60 * 60 * 24 * 30,
+    maxAge: refresh,
   });
 
   return response;

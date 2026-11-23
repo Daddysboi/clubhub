@@ -56,21 +56,53 @@ export function formatDateTime(value: string | Date | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
+    // A bare "10:30" is ambiguous when organisers and fans are in different
+    // zones. Showing the viewer's offset makes DST and travel explicit.
+    timeZoneName: "short",
   });
 }
 
+/**
+ * Relative kickoff labels compare calendar days in the viewer's zone, not
+ * rounded milliseconds. Rounding 13 hours to "Tomorrow" (or 13 hours ago to
+ * "Yesterday") was wrong around midnight and across DST changes.
+ */
 export function relativeKickoff(value: string | Date | null | undefined) {
   if (!value) return null;
-  const d = typeof value === "string" ? new Date(value) : value;
-  const diff = d.getTime() - Date.now();
-  if (Number.isNaN(diff)) return null;
-  const days = Math.round(diff / 86_400_000);
+  const d = parseDateValue(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((target - today) / 86_400_000);
   if (days === 0) return "Today";
   if (days === 1) return "Tomorrow";
   if (days > 1 && days < 7) return `In ${days} days`;
   if (days === -1) return "Yesterday";
   if (days < -1) return `${Math.abs(days)} days ago`;
   return null;
+}
+
+/** ISO instant -> the `YYYY-MM-DDTHH:mm` shape a `datetime-local` input needs. */
+export function toLocalInputValue(value: string | Date | null | undefined) {
+  if (!value) return "";
+  const d = parseDateValue(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * `datetime-local` has no offset, so `new Date(value)` in a browser reads it in
+ * the organiser's zone. Converting to an ISO instant here pins the moment
+ * before it reaches the server (whose zone may be UTC).
+ */
+export function localInputToIso(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return "";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
 export function initials(name: string) {

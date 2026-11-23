@@ -25,6 +25,7 @@ export const STORAGE_BUCKETS = {
   teams: "team-logos",
   matches: "match-photos",
   tournaments: "tournament-banners",
+  memories: "tournament-memories",
 } as const;
 
 export type BucketName = (typeof STORAGE_BUCKETS)[keyof typeof STORAGE_BUCKETS];
@@ -32,4 +33,16 @@ export type BucketName = (typeof STORAGE_BUCKETS)[keyof typeof STORAGE_BUCKETS];
 export function publicImageUrl(bucket: BucketName, path: string) {
   const { url } = keys();
   return `${url}/storage/v1/object/public/${bucket}/${path}`;
+}
+
+/** Inverse of publicImageUrl — used when removing or downloading an object. */
+export function storagePathFromPublicUrl(url: string, bucket: BucketName): string | null {
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const at = url.indexOf(marker);
+  if (at < 0) return null;
+  try {
+    return decodeURIComponent(url.slice(at + marker.length).split("?")[0]);
+  } catch {
+    return null;
+  }
 }

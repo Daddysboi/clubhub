@@ -2,6 +2,9 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { isUuid } from "@/lib/format";
+import { safeInternalPath, sessionCookieMaxAges } from "@/lib/security";
+import { loginSchema } from "@/lib/validation";
 
 /**
  * Organiser sign-in.
@@ -17,18 +20,17 @@ import { redirect } from "next/navigation";
 
 type ActionState = { error: string | null; lastEmail?: string };
 
-const COOKIE_MAX_AGE = 60 * 60 * 8; // refresh token lifetime hint
-
 export async function adminSignIn(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
-  const next = String(formData.get("next") ?? "/admin");
+  const next = safeInternalPath(formData.get("next"), "/admin");
 
-  if (!email || !password) {
-    return { error: "Enter your email and password.", lastEmail: email };
+  const parsed = loginSchema.safeParse({ email, password });
+  if (!parsed.success) {
+    return { error: "Enter a valid email and password.", lastEmail: email };
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -63,11 +65,10 @@ export async function adminSignIn(
     session = await res.json();
 
     if (!res.ok || !session.access_token) {
-      const invalid = res.status === 400;
+      // Provider details can contain internal context; log server-side only.
+      if (res.status !== 400) console.error("[auth] sign-in failed", res.status);
       return {
-        error: invalid
-          ? "Wrong email or password."
-          : (session.error_description ?? session.error ?? "Could not sign in. Try again."),
+        error: res.status === 400 ? "Wrong email or password." : "Could not sign in. Try again.",
         lastEmail: email,
       };
     }
@@ -81,7 +82,7 @@ export async function adminSignIn(
 
   // Keep the service role out of the cookies: the session token is a user
   // token, and the admins table is what actually grants organiser access.
-  const maxAge = session.expires_in ?? COOKIE_MAX_AGE;
+  const { access, refresh } = sessionCookieMaxAges(session.expires_in);
   const userId = session.user?.id ?? "";
 
   const cookieStore = await cookies();
@@ -92,18 +93,35 @@ export async function adminSignIn(
     path: "/",
   };
 
-  cookieStore.set("sb-access-token", session.access_token, { ...cookieOptions, maxAge });
-  cookieStore.set("sb-refresh-token", session.refresh_token, { ...cookieOptions, maxAge });
-  if (userId) cookieStore.set("sb-user-id", userId, { ...cookieOptions, maxAge });
+  cookieStore.set("sb-access-token", session.access_token, { ...cookieOptions, maxAge: access });
+  cookieStore.set("sb-refresh-token", session.refresh_token, {
+    ...cookieOptions,
+    maxAge: refresh,
+  });
+  if (userId && isUuid(userId)) {
+    cookieStore.set("sb-user-id", userId, { ...cookieOptions, maxAge: refresh });
+  }
 
-  // Only redirect to a path on this site — never to an absolute URL, which
-  // would turn the sign-in form into an open redirect.
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/admin";
-  redirect(safeNext);
+  // `next` was already constrained to a same-origin path on the way in.
+  redirect(next);
 }
 
 export async function adminSignOut() {
   const cookieStore = await cookies();
+  const accessToken = cookieStore.get("sb-access-token")?.value;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  // Best effort: revoke the refresh token server-side before dropping cookies,
+  // so a stolen copy cannot be exchanged for a new session.
+  if (accessToken && url && key) {
+    await fetch(`${url}/auth/v1/logout`, {
+      method: "POST",
+      headers: { apikey: key, Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    }).catch(() => null);
+  }
+
   cookieStore.delete("sb-access-token");
   cookieStore.delete("sb-refresh-token");
   cookieStore.delete("sb-user-id");

@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   getStandings,
   getTournamentMatches,
+  getTournamentMemories,
   getTournamentTeams,
   listTournaments,
 } from "@/lib/db/queries";
@@ -38,10 +39,11 @@ export default async function HomePage() {
   }
 
   const featured = visible.find((t) => t.status === "live") ?? visible[0];
-  const [teamList, matchList, standings] = await Promise.all([
+  const [teamList, matchList, standings, memories] = await Promise.all([
     getTournamentTeams(featured.id),
     getTournamentMatches(featured.id),
     getStandings(featured.id),
+    getTournamentMemories(featured.id),
   ]);
   const teamMap = new Map(teamList.map((t) => [t.id, t as Team]));
 
@@ -53,6 +55,9 @@ export default async function HomePage() {
   // statusTone()/statusLabel() own the status→tone mapping. Inlining a ternary
   // here is how the hero badge and the tournament cards drifted apart before.
   const featuredLive = featured.status === "live";
+  // A small taste of the album on the landing page. The full, interactive
+  // gallery stays on the tournament hub so this page remains a fast overview.
+  const photoPreview = memories.slice(0, 3);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:py-12">
@@ -211,6 +216,44 @@ export default async function HomePage() {
           </Card>
         </section>
       </div>
+
+      {photoPreview.length > 0 ? (
+        <section className="mt-12">
+          <SectionHeading
+            title="Photos"
+            eyebrow="Memories"
+            action={
+              <Link
+                href={`/tournaments/${featured.slug}#memories`}
+                className="text-sm font-semibold text-[var(--pitch)] hover:underline"
+              >
+                View album
+              </Link>
+            }
+          />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {photoPreview.map((photo) => (
+              <Link
+                key={photo.id}
+                href={`/tournaments/${featured.slug}?photo=${photo.id}`}
+                className="group relative block aspect-[4/3] overflow-hidden rounded-xl border border-[var(--rule)] bg-[var(--surface)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pitch)]"
+              >
+                <Image
+                  src={photo.url}
+                  alt={photo.caption ?? "Tournament memory"}
+                  fill
+                  sizes="(max-width: 640px) 50vw, 240px"
+                  className="object-cover transition duration-300 group-hover:scale-105"
+                />
+                <span aria-hidden className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                <span className="absolute inset-x-2 bottom-2 line-clamp-1 text-xs font-semibold text-white">
+                  {photo.caption ?? "Match day"}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {visible.length > 1 ? (
         <section className="mt-12">

@@ -1,19 +1,24 @@
 import "server-only";
 import { alias } from "drizzle-orm/pg-core";
-import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   matchEvents,
   matches,
+  memoryComments,
+  memoryLikes,
   players,
   teamPlayers,
   teams,
+  tournamentMemories,
   tournaments,
   type MatchEvent,
   type TeamWithCaptain,
 } from "./schema";
 import { computeStandings, type Standings } from "../standings";
 import { isUuid } from "../format";
+import { likeContains } from "../search";
+import type { EngagementSnapshot, GalleryComment } from "../engagement";
 import {
   bestAttack,
   bestDefence,
@@ -99,6 +104,89 @@ export async function getTournamentMatches(tournamentId: string) {
     .orderBy(asc(matches.round), asc(matches.scheduledAt));
 }
 
+/** Public photo album for one cup, in the order the organiser added them. */
+export async function getTournamentMemories(tournamentId: string) {
+  return db
+    .select()
+    .from(tournamentMemories)
+    .where(eq(tournamentMemories.tournamentId, tournamentId))
+    .orderBy(asc(tournamentMemories.createdAt), asc(tournamentMemories.id));
+}
+
+/** Photo counts per cup, so public listings can advertise the album. */
+export async function getMemoryCountsByTournament(): Promise<Record<string, number>> {
+  const rows = await db
+    .select({ tournamentId: tournamentMemories.tournamentId, n: sql<number>`count(*)::int` })
+    .from(tournamentMemories)
+    .groupBy(tournamentMemories.tournamentId);
+  return Object.fromEntries(rows.map((row) => [row.tournamentId, row.n]));
+}
+
+const MAX_PUBLIC_COMMENTS = 200;
+
+async function loadMemoryComments(tournamentId: string, visitorId: string, limit?: number) {
+  const query = db
+    .select({
+      id: memoryComments.id,
+      memoryId: memoryComments.memoryId,
+      visitorId: memoryComments.visitorId,
+      authorName: memoryComments.authorName,
+      body: memoryComments.body,
+      createdAt: memoryComments.createdAt,
+    })
+    .from(memoryComments)
+    .innerJoin(tournamentMemories, eq(memoryComments.memoryId, tournamentMemories.id))
+    .where(eq(tournamentMemories.tournamentId, tournamentId))
+    .orderBy(desc(memoryComments.createdAt), desc(memoryComments.id));
+
+  const rows = limit ? await query.limit(limit) : await query;
+
+  const grouped: Record<string, GalleryComment[]> = {};
+  for (const row of rows) {
+    (grouped[row.memoryId] ??= []).push({
+      id: row.id,
+      memoryId: row.memoryId,
+      authorName: row.authorName,
+      body: row.body,
+      createdAt: row.createdAt.toISOString(),
+      mine: row.visitorId === visitorId,
+    });
+  }
+  // Newest first from the query; each photo reads chronologically.
+  for (const comments of Object.values(grouped)) comments.reverse();
+  return grouped;
+}
+
+/** Likes, own-likes and comments for one visitor, grouped by photo id. */
+export async function getMemoryEngagement(
+  tournamentId: string,
+  visitorId: string,
+): Promise<EngagementSnapshot> {
+  const likeRows = await db
+    .select({ memoryId: memoryLikes.memoryId, visitorId: memoryLikes.visitorId })
+    .from(memoryLikes)
+    .innerJoin(tournamentMemories, eq(memoryLikes.memoryId, tournamentMemories.id))
+    .where(eq(tournamentMemories.tournamentId, tournamentId));
+
+  const counts: Record<string, number> = {};
+  const liked: string[] = [];
+  for (const row of likeRows) {
+    counts[row.memoryId] = (counts[row.memoryId] ?? 0) + 1;
+    if (row.visitorId === visitorId) liked.push(row.memoryId);
+  }
+
+  return {
+    counts,
+    liked,
+    comments: await loadMemoryComments(tournamentId, visitorId, MAX_PUBLIC_COMMENTS),
+  };
+}
+
+/** All comments for the organiser's moderation panel. */
+export async function getAdminMemoryComments(tournamentId: string) {
+  return loadMemoryComments(tournamentId, "");
+}
+
 export async function getTournamentPlayers(tournamentId: string) {
   return db
     .select()
@@ -117,6 +205,8 @@ export async function getTournamentPlayers(tournamentId: string) {
  * attached to a team are part of a competition's public record.
  */
 export async function getPublicPlayers(tournamentId?: string) {
+  // Draft cups have no public page; their squads must not leak through search
+  // or the public roster either.
   const base = db
     .select({
       id: players.id,
@@ -129,11 +219,15 @@ export async function getPublicPlayers(tournamentId?: string) {
       teamId: teamPlayers.teamId,
     })
     .from(players)
-    .innerJoin(teamPlayers, eq(teamPlayers.playerId, players.id));
+    .innerJoin(teamPlayers, eq(teamPlayers.playerId, players.id))
+    .innerJoin(tournaments, eq(tournaments.id, players.tournamentId));
 
-  return tournamentId
-    ? base.where(eq(players.tournamentId, tournamentId)).orderBy(asc(players.fullName))
-    : base.orderBy(desc(players.createdAt));
+  const conditions = [ne(tournaments.status, "draft")];
+  if (tournamentId) conditions.push(eq(players.tournamentId, tournamentId));
+
+  return base.where(and(...conditions)).orderBy(
+    tournamentId ? asc(players.fullName) : desc(players.createdAt),
+  );
 }
 
 /** Duplicate check: case-insensitive match on full name OR nickname in the same scope. */
@@ -178,7 +272,9 @@ export async function getStandings(tournamentId: string): Promise<Standings> {
     getTournamentTeams(tournamentId),
     getTournamentMatches(tournamentId),
   ]);
-  return computeStandings(teamRows, matchRows);
+  // A final or a semi-final is not a league game. Only the group phase feeds
+  // the table, otherwise a decider would inflate played/points/goals.
+  return computeStandings(teamRows, matchRows, ["group"]);
 }
 
 /**
@@ -187,9 +283,14 @@ export async function getStandings(tournamentId: string): Promise<Standings> {
  * Inner join, same privacy boundary as `getPublicPlayers`: search must not
  * become a way to enumerate players who have not been placed in a squad.
  */
-export async function searchPlayers(query: string, limit = 50) {
+export async function searchPlayers(query: string, scope?: string, limit = 50) {
   const q = query.trim();
-  if (!q) return getPublicPlayers();
+  if (!q) return getPublicPlayers(scope);
+
+  const pattern = likeContains(q);
+  const conditions = [ilike(players.fullName, pattern), ne(tournaments.status, "draft")];
+  if (scope) conditions.push(eq(players.tournamentId, scope));
+
   return db
     .select({
       id: players.id,
@@ -203,7 +304,8 @@ export async function searchPlayers(query: string, limit = 50) {
     })
     .from(players)
     .innerJoin(teamPlayers, eq(teamPlayers.playerId, players.id))
-    .where(ilike(players.fullName, `%${q}%`))
+    .innerJoin(tournaments, eq(tournaments.id, players.tournamentId))
+    .where(and(...conditions))
     .limit(limit);
 }
 
@@ -341,9 +443,7 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
     getPlayersForTournament(tournamentId),
   ]);
 
-  const finishedMatchIds = new Set(
-    matchList.filter((m) => m.status === "finished").map((m) => m.id),
-  );
+  const finishedMatches = matchList.filter((m) => m.status === "finished");
 
   const membership = new Map(roster.map((p) => [p.id, p.teamId]));
   const teamNames = new Map(teamList.map((t) => [t.id, t.name]));
@@ -356,15 +456,17 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
       position: p.position,
     })),
     events: eventList,
-    finishedMatchIds,
+    finishedMatches,
     membership,
     teamNames,
   });
 
-  const teamStats = computeTeamStats(teamList, matchList, eventList);
+  // League records describe the group phase only. A cup final is a decider,
+  // not another regular-season fixture.
+  const teamStats = computeTeamStats(teamList, matchList, eventList, ["group"]);
 
   return {
-    standings: computeStandings(teamList, matchList),
+    standings: computeStandings(teamList, matchList, ["group"]),
     teamStats,
     playerStats,
     scorers: topScorers(playerStats),

@@ -18,8 +18,9 @@ export default async function PlayersPage({
 
   const tournaments = (await listTournaments()).filter((t) => t.status !== "draft");
 
-  const rows = query ? await searchPlayers(query) : await getPublicPlayers(scope);
-  const players = scope ? rows.filter((p) => p.tournamentId === scope) : rows;
+  // Scope is applied in SQL before the LIMIT, so a filtered search cannot miss
+  // matching players simply because unrelated rows filled the first page.
+  const players = query ? await searchPlayers(query, scope) : await getPublicPlayers(scope);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">

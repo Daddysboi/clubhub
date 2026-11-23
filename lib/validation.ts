@@ -1,5 +1,32 @@
 import { z } from "zod";
 import { POSITIONS, EVENT_TYPES } from "@/lib/db/schema";
+import { FORMAT_IDS, MATCH_STAGES } from "@/lib/stages";
+
+/**
+ * Image fields are rendered straight into `<Image src>`, so a bare `z.string()`
+ * is not enough. In production only this project's Supabase host is accepted;
+ * when the env var is absent (tests, local scaffolding) any https host passes.
+ */
+export const optionalImageUrl = z.string().trim().refine((value) => {
+  if (!value) return true;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && /^(localhost|127\.0\.0\.1)$/.test(parsed.hostname))) {
+    return false;
+  }
+
+  const configured = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!configured) return true;
+  try {
+    return parsed.hostname === new URL(configured).hostname;
+  } catch {
+    return true;
+  }
+}, "Use an image URL from this site's storage");
 
 export const signupSchema = z.object({
   tournamentId: z.string().uuid().optional().or(z.literal("")),
@@ -23,7 +50,7 @@ export const signupSchema = z.object({
   position: z.enum(POSITIONS, {
     error: "Choose a position",
   }),
-  photoUrl: z.string().url().optional().or(z.literal("")),
+  photoUrl: optionalImageUrl.optional().default(""),
 });
 
 export type SignupInput = z.infer<typeof signupSchema>;
@@ -43,6 +70,7 @@ export const tournamentSchema = z.object({
   clubName: z.string().trim().max(80).optional().or(z.literal("")),
   venue: z.string().trim().max(120).optional().or(z.literal("")),
   startDate: z.string().optional().or(z.literal("")),
+  format: z.enum(FORMAT_IDS).default("league"),
   status: z.enum(["draft", "live", "done"]),
 });
 
@@ -65,7 +93,7 @@ export const teamSchema = z.object({
   color: hexColor.optional(),
   primaryColor: hexColor.optional(),
   secondaryColor: hexColor.optional(),
-  logoUrl: z.string().optional().or(z.literal("")),
+  logoUrl: optionalImageUrl.optional().default(""),
 });
 
 /**
@@ -93,17 +121,61 @@ export const assignSchema = z.object({
   teamId: z.string().uuid().optional().or(z.literal("")),
 });
 
+/** A kickoff must be an instant, never a bare local time the server guesses at. */
+const optionalIsoInstant = z
+  .string()
+  .trim()
+  .refine(
+    (value) =>
+      !value ||
+      (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(value) &&
+        !Number.isNaN(Date.parse(value))),
+    "Use a valid kickoff date and time with a timezone",
+  )
+  .optional()
+  .default("");
+
 export const matchSchema = z.object({
   tournamentId: z.string().uuid(),
   homeTeamId: z.string().uuid("Pick a home team"),
   awayTeamId: z.string().uuid("Pick an away team"),
   round: z.coerce.number().int().min(1).max(99).default(1),
-  scheduledAt: z.string().optional().or(z.literal("")),
+  stage: z.enum(MATCH_STAGES).default("group"),
+  scheduledAt: optionalIsoInstant,
   venue: z.string().trim().max(120).optional().or(z.literal("")),
   notes: z.string().trim().max(300).optional().or(z.literal("")),
 }).refine((v) => v.homeTeamId !== v.awayTeamId, {
   message: "A team cannot play itself",
   path: ["awayTeamId"],
+});
+
+/** Per-photo metadata submitted alongside a bulk memory upload. */
+export const memoryMetaSchema = z.object({
+  tournamentId: z.string().uuid("Invalid tournament"),
+  caption: z.string().trim().max(140, "Caption is too long").optional().or(z.literal("")),
+  matchId: z.string().uuid().optional().or(z.literal("")),
+  width: z.coerce.number().int().min(1).max(20000),
+  height: z.coerce.number().int().min(1).max(20000),
+});
+
+export const memoryLikeSchema = z.object({
+  memoryId: z.string().uuid("Invalid photo"),
+  visitorId: z.string().uuid("Invalid visitor"),
+});
+
+export const memoryCommentSchema = z.object({
+  memoryId: z.string().uuid("Invalid photo"),
+  visitorId: z.string().uuid("Invalid visitor"),
+  authorName: z
+    .string()
+    .trim()
+    .min(2, "Add your name")
+    .max(40, "Name is too long"),
+  body: z
+    .string()
+    .trim()
+    .min(1, "Write a comment")
+    .max(280, "Keep it under 280 characters"),
 });
 
 export const scoreSchema = z.object({

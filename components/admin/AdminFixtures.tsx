@@ -8,12 +8,16 @@ import { Card, SectionHeading, Stamp } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TeamCrest } from "@/components/TeamCrest";
 import {
+  createFinalForm,
   deleteMatchForm,
   generateFixturesForm,
   saveMatch,
+  saveMatchForm,
   setMatchPhotoForm,
   updateScoreForm,
 } from "@/app/actions/admin";
+import { FORMATS, MATCH_STAGES, stageLabel, type FormatId } from "@/lib/stages";
+import { localInputToIso, toLocalInputValue } from "@/lib/format";
 import type { Tournament, Team, Match } from "@/lib/db/schema";
 
 export function AdminFixtures({
@@ -26,6 +30,10 @@ export function AdminFixtures({
   matches: Match[];
 }) {
   const teamName = new Map(teams.map((t) => [t.id, t.name]));
+  // Only a tri-series seeds its final from the table. A knockout cup already
+  // has its bracket, and a league has no final at all.
+  const canHaveFinal = tournament.format === "tri_series";
+  const hasFinal = matches.some((m) => m.stage === "final");
 
   return (
     <section>
@@ -33,10 +41,18 @@ export function AdminFixtures({
         title="Fixtures & scores"
         eyebrow={`${matches.length} matches`}
         action={
-          <form action={generateFixturesForm}>
-            <input type="hidden" name="tournamentId" value={tournament.id} />
-            <GenerateButton disabled={teams.length < 2 || matches.length > 0} />
-          </form>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canHaveFinal && !hasFinal ? (
+              <form action={createFinalForm}>
+                <input type="hidden" name="tournamentId" value={tournament.id} />
+                <CreateFinalButton disabled={teams.length < 2} />
+              </form>
+            ) : null}
+            <form action={generateFixturesForm}>
+              <input type="hidden" name="tournamentId" value={tournament.id} />
+              <GenerateButton disabled={teams.length < 2 || matches.length > 0} />
+            </form>
+          </div>
         }
       />
 
@@ -56,12 +72,13 @@ export function AdminFixtures({
                 teams={teams}
                 homeName={teamName.get(match.homeTeamId) ?? "?"}
                 awayName={teamName.get(match.awayTeamId) ?? "?"}
+                format={tournament.format}
               />
             ))
           )}
         </div>
 
-        <AddFixture tournamentId={tournament.id} teams={teams} />
+        <AddFixture tournamentId={tournament.id} teams={teams} format={tournament.format} />
       </div>
     </section>
   );
@@ -72,22 +89,28 @@ function MatchEditor({
   teams,
   homeName,
   awayName,
+  format,
 }: {
   match: Match;
   teams: Team[];
   homeName: string;
   awayName: string;
+  format: string;
 }) {
   const [homeScore, setHomeScore] = useState(match.homeScore?.toString() ?? "");
   const [awayScore, setAwayScore] = useState(match.awayScore?.toString() ?? "");
   const [status, setStatus] = useState(match.status);
-  const { pending } = useFormStatus();
+  const [kickoffLocal, setKickoffLocal] = useState(toLocalInputValue(match.scheduledAt));
+  const [scheduledIso, setScheduledIso] = useState(
+    match.scheduledAt ? new Date(match.scheduledAt).toISOString() : "",
+  );
+  const fixture = `${homeName} versus ${awayName}`;
 
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="w-10 shrink-0 text-xs font-semibold text-[var(--ink-3)]">
-          R{match.round}
+        <span className="w-24 shrink-0 text-xs font-semibold text-[var(--ink-3)]">
+          {stageLabel(match.stage, match.round, format)}
         </span>
 
         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -144,9 +167,12 @@ function MatchEditor({
           </Field>
         </div>
 
-        <Button type="submit" size="sm" disabled={pending || homeScore === "" || awayScore === ""}>
-          {pending ? "Saving…" : "Save score"}
-        </Button>
+        <SaveButton
+          disabled={homeScore === "" || awayScore === ""}
+          label="Save score"
+          pendingLabel="Saving score…"
+          aria-label={`Save score for ${fixture}`}
+        />
 
         <div className="ml-auto flex items-center gap-2">
           <Input
@@ -157,16 +183,79 @@ function MatchEditor({
             aria-label="Match photo URL"
             className="min-h-9 w-44 py-1.5 text-sm"
           />
-          <Button
-            type="submit"
+          <SaveButton
             variant="secondary"
-            size="sm"
+            label="Photo"
+            pendingLabel="Saving…"
+            aria-label={`Save photo URL for ${fixture}`}
             formAction={setMatchPhotoForm}
-            disabled={pending}
-          >
-            Photo
-          </Button>
+          />
         </div>
+      </form>
+
+      {/* Stage is stored per match, so any competition shape can be edited
+          here without changing code — including adding a final by hand. */}
+      <form
+        action={saveMatchForm}
+        className="mt-2 flex flex-wrap items-end gap-2 border-t border-[var(--rule)] pt-3"
+      >
+        <input type="hidden" name="matchId" value={match.id} />
+        <input type="hidden" name="tournamentId" value={match.tournamentId} />
+        <input type="hidden" name="homeTeamId" value={match.homeTeamId} />
+        <input type="hidden" name="awayTeamId" value={match.awayTeamId} />
+        <input type="hidden" name="venue" value={match.venue ?? ""} />
+        {/* The browser converts the organiser's local input to an ISO instant
+            below; the server must never parse a zone-less datetime-local. */}
+        <input type="hidden" name="scheduledAt" value={scheduledIso} />
+
+        <div className="min-w-32 flex-1">
+          <Field label="Stage" htmlFor={`stage-${match.id}`}>
+            <Select id={`stage-${match.id}`} name="stage" defaultValue={match.stage}>
+              <StageOptions format={format} current={match.stage} />
+            </Select>
+          </Field>
+        </div>
+
+        <div className="min-w-40 flex-1">
+          <Field label="Kickoff (your local time)" htmlFor={`kickoff-${match.id}`}>
+            <Input
+              id={`kickoff-${match.id}`}
+              type="datetime-local"
+              value={kickoffLocal}
+              onChange={(event) => {
+                setKickoffLocal(event.target.value);
+                setScheduledIso(localInputToIso(event.target.value));
+              }}
+            />
+          </Field>
+        </div>
+        <div className="w-20">
+          <Field label="Round" htmlFor={`round-${match.id}`}>
+            <Input
+              id={`round-${match.id}`}
+              name="round"
+              type="number"
+              min={1}
+              defaultValue={match.round}
+            />
+          </Field>
+        </div>
+        <div className="min-w-40 flex-1">
+          <Field label="Notes" htmlFor={`notes-${match.id}`}>
+            <Input
+              id={`notes-${match.id}`}
+              name="notes"
+              defaultValue={match.notes ?? ""}
+              placeholder="Optional note"
+            />
+          </Field>
+        </div>
+        <SaveButton
+          variant="secondary"
+          label="Save stage"
+          pendingLabel="Saving stage…"
+          aria-label={`Save stage and kickoff for ${fixture}`}
+        />
       </form>
 
       {/* Outside the score form: ConfirmDialog renders its own <form> and
@@ -175,6 +264,7 @@ function MatchEditor({
         <ConfirmDialog
           action={deleteMatchForm}
           triggerLabel="Delete fixture"
+          triggerAriaLabel={`Delete fixture: ${fixture}`}
           title="Delete this fixture?"
           body={
             <>
@@ -191,14 +281,23 @@ function MatchEditor({
   );
 }
 
-function AddFixture({ tournamentId, teams }: { tournamentId: string; teams: Team[] }) {
+function AddFixture({
+  tournamentId,
+  teams,
+  format,
+}: {
+  tournamentId: string;
+  teams: Team[];
+  format: string;
+}) {
   const [state, formAction] = useActionState(saveMatch, { ok: false });
-  const { pending } = useFormStatus();
 
   // A side is filtered out of the other dropdown, so "Team 1 vs Team 1" cannot
   // be picked in the first place. The server rejects it regardless.
   const [homeTeamId, setHomeTeamId] = useState("");
   const [awayTeamId, setAwayTeamId] = useState("");
+  const [kickoffLocal, setKickoffLocal] = useState("");
+  const [scheduledIso, setScheduledIso] = useState("");
 
   return (
     <Card className="p-5">
@@ -250,8 +349,25 @@ function AddFixture({ tournamentId, teams }: { tournamentId: string; teams: Team
           <Input id="round" name="round" type="number" min={1} defaultValue={1} className="w-24" />
         </Field>
 
-        <Field label="Kickoff" htmlFor="scheduledAt">
-          <Input id="scheduledAt" name="scheduledAt" type="datetime-local" />
+        <Field label="Stage" htmlFor="stage">
+          <Select id="stage" name="stage" defaultValue="group">
+            <StageOptions format={format} />
+          </Select>
+        </Field>
+
+        {/* Hidden ISO instant is what the server validates; the visible field
+            stays in the organiser's local time. */}
+        <input type="hidden" name="scheduledAt" value={scheduledIso} />
+        <Field label="Kickoff (your local time)" htmlFor="scheduledAt">
+          <Input
+            id="scheduledAt"
+            type="datetime-local"
+            value={kickoffLocal}
+            onChange={(event) => {
+              setKickoffLocal(event.target.value);
+              setScheduledIso(localInputToIso(event.target.value));
+            }}
+          />
         </Field>
 
         <Field label="Venue" htmlFor="matchVenue">
@@ -263,14 +379,68 @@ function AddFixture({ tournamentId, teams }: { tournamentId: string; teams: Team
         </Field>
 
         {state.message ? (
-          <Stamp tone={state.ok ? "pitch" : "live"}>{state.message}</Stamp>
+          <p role="status">
+            <Stamp tone={state.ok ? "pitch" : "live"}>{state.message}</Stamp>
+          </p>
         ) : null}
 
-        <Button type="submit" block disabled={pending || teams.length < 2}>
-          {pending ? "Adding…" : "Add fixture"}
-        </Button>
+        <SaveButton block disabled={teams.length < 2} label="Add fixture" pendingLabel="Adding…" />
       </form>
     </Card>
+  );
+}
+
+/** Stage options follow the tournament format, but never hide a legacy value
+ *  already stored on a fixture (an old final in a league must stay editable). */
+function StageOptions({ format, current }: { format: string; current?: string }) {
+  const config = FORMATS[format as FormatId] ?? FORMATS.league;
+  const stages: string[] = MATCH_STAGES.filter((stage) => {
+    if (stage === "group") return config.hasGroups;
+    if (stage === "final") return config.hasKnockout;
+    return true;
+  });
+  if (current && !stages.includes(current)) stages.push(current);
+  return (
+    <>
+      {stages.map((stage) => (
+        <option key={stage} value={stage}>
+          {stageLabel(stage, 1, format)}
+        </option>
+      ))}
+    </>
+  );
+}
+
+/**
+ * useFormStatus only sees a form when the hook is called inside it. Calling it
+ * in the parent made every "Saving…" state dead code.
+ */
+function SaveButton({
+  label,
+  pendingLabel,
+  disabled,
+  ...props
+}: Omit<React.ComponentProps<typeof Button>, "children"> & {
+  label: string;
+  pendingLabel: string;
+}) {
+  const { pending } = useFormStatus();
+  return (
+    <Button {...props} type="submit" disabled={disabled || pending}>
+      {pending ? pendingLabel : label}
+      <span className="sr-only" aria-live="polite">
+        {pending ? `${label} in progress` : ""}
+      </span>
+    </Button>
+  );
+}
+
+function CreateFinalButton({ disabled }: { disabled: boolean }) {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" size="sm" disabled={disabled}>
+      {pending ? "Creating…" : "Create final from table"}
+    </Button>
   );
 }
 

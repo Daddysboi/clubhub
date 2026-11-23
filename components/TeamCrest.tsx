@@ -25,7 +25,8 @@ export function TeamCrest({
     return (
       <Image
         src={team.logoUrl}
-        alt={`${team.name} crest`}
+        // Every call site already prints the team name next to the crest.
+        alt=""
         width={size}
         height={size}
         unoptimized

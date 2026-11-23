@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
  * Usage:
  *   npx tsx scripts/create-admin.ts admin@nhia.gov.ng 'your-password'
  *
- * Requires NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local.
+ * Requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local.
  */
 
 async function main() {

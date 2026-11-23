@@ -34,11 +34,13 @@ function match(
   awayScore: number | null,
   status: Match["status"],
   round = 1,
+  stage: Match["stage"] = "group",
 ): Match {
   return {
     id: uid(),
     tournamentId: "cup",
     round,
+    stage,
     homeTeamId: home.id,
     awayTeamId: away.id,
     scheduledAt: new Date(0),
@@ -364,5 +366,29 @@ describe("knockoutPairings", () => {
 
   it("drops a trailing unpaired team for an odd count", () => {
     expect(knockoutPairings(["a", "b", "c"])).toEqual([["a", "b"]]);
+  });
+});
+
+describe("computeStandings stage filter", () => {
+  it("excludes knockout ties from the league table", () => {
+    const a = team("A");
+    const b = team("B");
+    const groupGame = match(a, b, 1, 0, "finished", 1, "group");
+    const final = match(a, b, 0, 2, "finished", 2, "final");
+
+    const rows = computeStandings([a, b], [groupGame, final], ["group"]);
+
+    expect(rowFor(rows, "A")).toMatchObject({ played: 1, points: 3, goalsFor: 1 });
+    expect(rowFor(rows, "B")).toMatchObject({ played: 1, points: 0, goalsFor: 0 });
+  });
+
+  it("does not seed a final from an unplayed table", () => {
+    const a = team("A");
+    const b = team("B");
+    const final = match(a, b, 2, 0, "finished", 2, "final");
+
+    const rows = computeStandings([a, b], [final], ["group"]);
+
+    expect(rows.every((row) => row.played === 0)).toBe(true);
   });
 });

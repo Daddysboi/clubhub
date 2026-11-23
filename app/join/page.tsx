@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function JoinPage() {
   const all = await listTournaments();
-  const open = all.filter((t) => t.status === "live" || t.status === "draft");
+  const open = all.filter((t) => t.status === "live");
 
   return (
     <div className="mx-auto max-w-xl px-4 py-10">

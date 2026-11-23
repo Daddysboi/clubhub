@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/db/auth";
 import { players, tournaments } from "@/lib/db/schema";
 import { findDuplicatePlayer } from "@/lib/db/queries";
+import { isUuid } from "@/lib/format";
 import { classifyDuplicate, firstError, signupSchema } from "@/lib/validation";
 
 export type ActionState = {
@@ -25,7 +26,7 @@ async function slugFor(tournamentId: string | null) {
   return rows[0]?.slug ?? null;
 }
 
-function refresh(tournamentId: string | null) {
+async function refresh(tournamentId: string | null) {
   // Refetch the current route's RSC payload so a signup shows its own write
   // immediately rather than the pre-signup roster.
   refreshCurrentRoute();
@@ -33,7 +34,8 @@ function refresh(tournamentId: string | null) {
   revalidatePath("/admin");
   revalidatePath("/players");
   revalidatePath("/join", "layout");
-  const slug = slugFor(tournamentId);
+  revalidatePath("/tournaments", "layout");
+  const slug = await slugFor(tournamentId);
   if (slug) revalidatePath(`/tournaments/${slug}`);
 }
 
@@ -67,11 +69,16 @@ async function registerPlayer(formData: FormData): Promise<ActionState> {
 
   if (tournamentId) {
     const exists = await db
-      .select({ id: tournaments.id })
+      .select({ id: tournaments.id, status: tournaments.status })
       .from(tournaments)
       .where(eq(tournaments.id, tournamentId))
       .limit(1);
     if (!exists[0]) return { ok: false, message: "That tournament does not exist." };
+    // A draft cup has no public page, and a finished cup must not quietly keep
+    // accepting names through a reused form action.
+    if (exists[0].status !== "live") {
+      return { ok: false, message: "Registration for this tournament is closed." };
+    }
   }
 
   const duplicate = await findDuplicatePlayer({
@@ -116,7 +123,7 @@ async function registerPlayer(formData: FormData): Promise<ActionState> {
     })
     .returning({ id: players.id });
 
-  refresh(tournamentId);
+  await refresh(tournamentId);
 
   return {
     ok: true,
@@ -155,7 +162,7 @@ export async function signupStandalonePlayer(
 export async function deletePlayer(_prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireAdmin();
   const playerId = String(formData.get("playerId") ?? "");
-  if (!playerId) return { ok: false, message: "Missing player" };
+  if (!isUuid(playerId)) return { ok: false, message: "Invalid player" };
 
   const existing = await db
     .select({ tournamentId: players.tournamentId, fullName: players.fullName })
@@ -168,7 +175,7 @@ export async function deletePlayer(_prev: ActionState, formData: FormData): Prom
 
   // A player may belong to no competition at all, which was the entire reason
   // this list was reachable from /admin rather than a tournament roster only.
-  refresh(existing[0].tournamentId);
+  await refresh(existing[0].tournamentId);
 
   return { ok: true, message: `${existing[0].fullName} removed` };
 }

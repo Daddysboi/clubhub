@@ -41,6 +41,7 @@ const match: Match = {
   id: MATCH_ID,
   tournamentId: TOURNAMENT_ID,
   round: 1,
+  stage: "group",
   homeTeamId: HOME_ID,
   awayTeamId: AWAY_ID,
   scheduledAt: null,
